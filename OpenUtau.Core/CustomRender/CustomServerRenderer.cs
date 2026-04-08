@@ -1,0 +1,231 @@
+﻿﻿﻿﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using NAudio.Wave;
+using Newtonsoft.Json;
+using OpenUtau.Core.Format;
+using OpenUtau.Core.Render;
+using OpenUtau.Core.Ustx;
+using OpenUtau.Core.Util;
+using Serilog;
+
+namespace OpenUtau.Core.CustomRender {
+    public class CustomServerRenderer : IRenderer {
+        private readonly string serverUrl;
+        private readonly HttpClient httpClient;
+
+        public CustomServerRenderer(string serverUrl = "http://localhost:8000/synthesize") {
+            this.serverUrl = serverUrl;
+            this.httpClient = new HttpClient();
+            this.httpClient.Timeout = TimeSpan.FromMinutes(5);
+        }
+
+        public USingerType SingerType => USingerType.Classic;
+
+        public bool SupportsRenderPitch => false;
+
+        public bool SupportsExpression(UExpressionDescriptor descriptor) {
+            return true;
+        }
+
+        public RenderResult Layout(RenderPhrase phrase) {
+            return new RenderResult() {
+                leadingMs = phrase.leadingMs,
+                positionMs = phrase.positionMs,
+                estimatedLengthMs = phrase.durationMs + phrase.leadingMs,
+            };
+        }
+
+        public Task<RenderResult> Render(RenderPhrase phrase, Progress progress, int trackNo, CancellationTokenSource cancellation, bool isPreRender) {
+            var task = Task.Run(() => {
+                try {
+                    string progressInfo = $"Track {trackNo + 1}: CustomServerRenderer \"{string.Join(" ", phrase.phones.Select(p => p.phoneme))}\"";
+                    progress.Complete(0, progressInfo);
+
+                    var wavPath = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav");
+                    phrase.AddCacheFile(wavPath);
+
+                    var result = Layout(phrase);
+
+                    if (File.Exists(wavPath)) {
+                        using (var waveStream = new WaveFileReader(wavPath)) {
+                            result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
+                        }
+                        if (result.samples != null) {
+                            Renderers.ApplyDynamics(phrase, result);
+                        }
+                        progress.Complete(phrase.phones.Length, progressInfo);
+                        return result;
+                    }
+
+                    var jsonData = ConvertPhraseToJson(phrase);
+                    Log.Information($"Sending JSON to server: {jsonData}");
+
+                    var response = SendToServer(jsonData, cancellation);
+                    if (response != null && response.Length > 0) {
+                        File.WriteAllBytes(wavPath, response);
+                        using (var waveStream = new WaveFileReader(wavPath)) {
+                            result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
+                        }
+                        if (result.samples != null) {
+                            Renderers.ApplyDynamics(phrase, result);
+                        }
+                    } else {
+                        Log.Warning("Server returned empty response, using fallback rendering");
+                        result = FallbackRender(phrase);
+                    }
+
+                    progress.Complete(phrase.phones.Length, progressInfo);
+                    return result;
+                } catch (Exception e) {
+                    Log.Error(e, "CustomServerRenderer failed");
+                    return FallbackRender(phrase);
+                }
+            });
+            return task;
+        }
+
+        private string ConvertPhraseToJson(RenderPhrase phrase) {
+            var phonemeList = new Dictionary<string, object>();
+            
+            // 时间相关参数
+            // duration_ms: 音素实际时长（毫秒），用于拉伸音素
+            // position_ms: 音素在时间轴上的位置（毫秒）
+            // Oto参数（用户可调整的最终值）
+            // Offset: 左偏移量（音频文件中有效音素的起始位置，毫秒）
+            // Consonant: 辅音固定部分长度（毫秒）
+            // Cutoff: 右切割点（音频文件中有效音素的结束位置，毫秒）
+            // Preutter: 音符开始前的发声时间（毫秒）
+            // Overlap: 与前一个音素的重叠时间（毫秒）
+
+            
+            // 各控制点的含义：
+            // p0 (包络起点/左线)：
+            // X: -preutter 毫秒（音符开始前）【辅音长度】【向前延伸】
+            // Y: 0（音量从0开始）
+            
+            // p1 (攻击点)：
+            // X: p0.X + Math.Max(overlap, 5f) 毫秒【交叉长度】【从头向后延伸】
+            // Y: atk * vol / 100f（攻击音量）
+            
+            // p2 (稳定点/音符开始)：
+            // X: Math.Max(0f, p1.X) 毫秒【音符起始点】
+            // Y: vol（目标音量）
+            
+            // p3 (衰减开始点)：
+            // X: DurationMs - tailIntrude 毫秒【固定线】
+            // Y: vol * (1f - dec / 100f)（衰减后的音量）
+            
+            // p4 (包络终点/右线)：
+            // X: p3.X + tailOverlap 毫秒【结尾衰减起始点】
+            // Y: 0（音量衰减到0）
+            
+            for (int i = 0; i < phrase.phones.Length; i++) {
+                var phone = phrase.phones[i];
+                var envelope = phone.envelope;
+                var phonemeData = new {
+                    phoneme_name = phone.phoneme,
+                    phoneme_type = GetPhonemeType(phone.phoneme),
+                    note_pitch = MusicMath.GetToneName(phone.tone),
+                    dur_correction_ms = phone.durCorrectionMs,
+                    // duration_ms = phone.durationMs,
+                    // position_ms = phone.positionMs,
+                    Note_flags = new {
+                        vel = phone.velocity * 100.0,
+                        flags = phone.flags
+                    },
+                    phoneme_Mark = new {
+                        audio_file_path = phone.oto?.File ?? "",
+                        Offset = phone.oto?.Offset ?? 0.0,
+                        Consonant = phone.oto?.Consonant ?? 0.0,
+                        Cutoff = phone.oto?.Cutoff ?? 0.0,
+                        Preutter = phone.oto?.Preutter ?? 0.0,
+                        Overlap = phone.oto?.Overlap ?? 0.0,
+                    },
+                    envelope = new {
+                        p0 = new { x = envelope[0].X, y = envelope[0].Y },
+                        p1 = new { x = envelope[1].X, y = envelope[1].Y },
+                        p2 = new { x = envelope[2].X, y = envelope[2].Y },
+                        p3 = new { x = envelope[3].X, y = envelope[3].Y },
+                        p4 = new { x = envelope[4].X, y = envelope[4].Y }
+                    }
+                };
+                phonemeList[(i + 1).ToString()] = phonemeData;
+            }
+
+            var jsonData = new {
+                out_wav = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav"),
+                wav_dur = phrase.durationMs,
+                render_mode = "normal",
+                phoneme_list = phonemeList,
+                Dynamic_parameter = new {
+                    pitch = phrase.pitches?.Select(p => (double)p).ToList() ?? new List<double>(),
+                    gen = phrase.gender?.Select(g => (double)g).ToList() ?? new List<double>(),
+                    dyn = phrase.dynamics?.Select(d => (double)d).ToList() ?? new List<double>(),
+                    tension = phrase.tension?.Select(t => (double)t).ToList() ?? new List<double>(),
+                    breath = phrase.breathiness?.Select(b => (double)b).ToList() ?? new List<double>()
+                }
+            };
+
+            var json = JsonConvert.SerializeObject(jsonData, Formatting.Indented);
+            Log.Information($"Generated JSON (UTF-8): {json}");
+            return json;
+        }
+
+        private string GetPhonemeType(string phoneme) {
+            // var vowels = new HashSet<string> { "a", "i", "u", "e", "o", "A", "I", "U", "E", "O", "N" };
+            // return vowels.Contains(phoneme) ? "V" : "C";
+            return "1";
+        }
+
+        private byte[] SendToServer(string jsonData, CancellationTokenSource cancellation) {
+            try {
+                var content = new StringContent(jsonData, Encoding.UTF8, "application/json");
+                content.Headers.ContentType.CharSet = "utf-8";
+                Log.Information($"Sending JSON to server with UTF-8 encoding");
+
+                var response = httpClient.PostAsync(serverUrl, content, cancellation.Token).Result;
+                
+                if (response.IsSuccessStatusCode) {
+                    Log.Information($"Server response: {response.StatusCode}");
+                    return response.Content.ReadAsByteArrayAsync().Result;
+                } else {
+                    var errorContent = response.Content.ReadAsStringAsync().Result;
+                    Log.Error($"Server returned error: {response.StatusCode}, Content: {errorContent}");
+                    return null;
+                } 
+            } catch (Exception e) {
+                Log.Error(e, "Failed to send data to server");
+                return null;
+            }
+        }
+
+        private RenderResult FallbackRender(RenderPhrase phrase) {
+            var result = Layout(phrase);
+            result.samples = new float[(int)(phrase.durationMs * 44.1)];
+            for (int i = 0; i < result.samples.Length; i++) {
+                result.samples[i] = 0;
+            }
+            return result;
+        }
+
+        public RenderPitchResult LoadRenderedPitch(RenderPhrase phrase) {
+            return null;
+        }
+
+        public List<RenderRealCurveResult> LoadRenderedRealCurves(RenderPhrase phrase) {
+            return new List<RenderRealCurveResult>(0);
+        }
+
+        public UExpressionDescriptor[] GetSuggestedExpressions(USinger singer, URenderSettings renderSettings) {
+            return new UExpressionDescriptor[] { };
+        }
+
+        public override string ToString() => "CUSTOM_SERVER";
+    }
+}
