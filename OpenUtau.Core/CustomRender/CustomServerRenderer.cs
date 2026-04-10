@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -42,58 +42,99 @@ namespace OpenUtau.Core.CustomRender {
             };
         }
 
-        public Task<RenderResult> Render(RenderPhrase phrase, Progress progress, int trackNo,
+        public async Task<RenderResult> Render(RenderPhrase phrase, Progress progress, int trackNo,
             CancellationTokenSource cancellation, bool isPreRender) {
-            var task = Task.Run(() => {
-                try {
-                    string progressInfo =
-                        $"Track {trackNo + 1}: CustomServerRenderer \"{string.Join(" ", phrase.phones.Select(p => p.phoneme))}\"";
-                    progress.Complete(0, progressInfo);
+            try {
+                string progressInfo =
+                    $"Track {trackNo + 1}: CustomServerRenderer \"{string.Join(" ", phrase.phones.Select(p => p.phoneme))}\"";
+                progress.Complete(0, progressInfo);
 
-                    var wavPath = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav");
-                    phrase.AddCacheFile(wavPath);
+                var wavPath = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav");
+                phrase.AddCacheFile(wavPath);
 
-                    var result = Layout(phrase);
+                var result = Layout(phrase);
 
-                    if (File.Exists(wavPath)) {
-                        using (var waveStream = new WaveFileReader(wavPath)) {
-                            result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
-                        }
-
-                        if (result.samples != null) {
-                            Renderers.ApplyDynamics(phrase, result);
-                        }
-
-                        progress.Complete(phrase.phones.Length, progressInfo);
-                        return result;
+                if (File.Exists(wavPath)) {
+                    using (var waveStream = new WaveFileReader(wavPath)) {
+                        result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
                     }
 
-                    var jsonData = ConvertPhraseToJson(phrase);
-                    Log.Information($"Sending JSON to server: {jsonData}");
-
-                    var wavData = SendToServer(jsonData, cancellation);
-                    if (wavData != null && wavData.Length > 0) {
-                        File.WriteAllBytes(wavPath, wavData);
-                        using (var waveStream = new WaveFileReader(wavPath)) {
-                            result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
-                        }
-
-                        if (result.samples != null) {
-                            Renderers.ApplyDynamics(phrase, result);
-                        }
-                    } else {
-                        Log.Warning("Server returned empty response, using fallback rendering");
-                        result = FallbackRender(phrase);
+                    if (result.samples != null) {
+                        Renderers.ApplyDynamics(phrase, result);
                     }
 
                     progress.Complete(phrase.phones.Length, progressInfo);
                     return result;
-                } catch (Exception e) {
-                    Log.Error(e, "CustomServerRenderer failed");
-                    return FallbackRender(phrase);
                 }
-            });
-            return task;
+
+                var jsonData = ConvertPhraseToJson(phrase);
+                Log.Information($"Sending JSON to server: {jsonData}");
+
+                var wavData = await SendToServerAsync(jsonData, cancellation).ConfigureAwait(false);
+                if (wavData != null && wavData.Length > 0) {
+                    File.WriteAllBytes(wavPath, wavData);
+                    using (var waveStream = new WaveFileReader(wavPath)) {
+                        result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
+                    }
+
+                    if (result.samples != null) {
+                        Renderers.ApplyDynamics(phrase, result);
+                    }
+                } else {
+                    Log.Warning("Server returned empty response, using fallback rendering");
+                    result = FallbackRender(phrase);
+                }
+
+                progress.Complete(phrase.phones.Length, progressInfo);
+                return result;
+            } catch (Exception e) {
+                Log.Error(e, "CustomServerRenderer failed");
+                return FallbackRender(phrase);
+            }
+        }
+
+        public static async Task<RenderResult[]> RenderBatch(
+            RenderPhrase[] phrases,
+            Progress progress,
+            int trackNo,
+            CancellationTokenSource cancellation,
+            string serverUrl = "http://localhost:8000/synthesize",
+            int maxConcurrency = 4) {
+            if (phrases == null || phrases.Length == 0) {
+                return Array.Empty<RenderResult>();
+            }
+
+            var httpClient = new HttpClient();
+            httpClient.Timeout = TimeSpan.FromMinutes(5);
+
+            var results = new RenderResult[phrases.Length];
+            var tasks = new List<Task<(int index, RenderResult result)>>();
+            var semaphore = new SemaphoreSlim(maxConcurrency);
+
+            for (int i = 0; i < phrases.Length; i++) {
+                int index = i;
+                var phrase = phrases[index];
+                
+                var task = Task.Run(async () => {
+                    await semaphore.WaitAsync(cancellation.Token).ConfigureAwait(false);
+                    try {
+                        var renderer = new CustomServerRenderer(serverUrl);
+                        var result = await renderer.Render(phrase, progress, trackNo, cancellation, false).ConfigureAwait(false);
+                        return (index, result);
+                    } finally {
+                        semaphore.Release();
+                    }
+                }, cancellation.Token);
+                tasks.Add(task);
+            }
+
+            var completedTasks = await Task.WhenAll(tasks).ConfigureAwait(false);
+            foreach (var (index, result) in completedTasks) {
+                results[index] = result;
+            }
+
+            httpClient.Dispose();
+            return results;
         }
 
         private string ConvertPhraseToJson(RenderPhrase phrase) {
@@ -136,8 +177,8 @@ namespace OpenUtau.Core.CustomRender {
             const int sampleRate = 44100;
             double frameMs = 1000.0 * hopSize / sampleRate;
 
-            // 计算目标帧数
-            int totalFrames = (int)Math.Ceiling(phrase.durationMs / frameMs);
+            // 计算目标帧数，添加缓冲帧确保结尾不丢失
+            int totalFrames = (int)Math.Ceiling((phrase.durationMs ) / frameMs);
 
             for (int i = 0; i < phrase.phones.Length; i++) {
                 var phone = phrase.phones[i];
@@ -207,11 +248,11 @@ namespace OpenUtau.Core.CustomRender {
                 // render_mode = "normal",
                 phoneme_list = phonemeList,
                 Dynamic_parameter = new {
-                    pitch = DiffSingerUtils.SampleCurve(phrase, phrase.pitches, 0, frameMs, totalFrames, 0, 0, x => MusicMath.ToneToFreq(x * 0.01)),
-                    gen = DiffSingerUtils.SampleCurve(phrase, phrase.gender, 0, frameMs, totalFrames, 0, 0, x => x),
-                    dyn = DiffSingerUtils.SampleCurve(phrase, phrase.dynamics, 0, frameMs, totalFrames, 0, 0, x => x),
-                    tension = DiffSingerUtils.SampleCurve(phrase, phrase.tension, 0, frameMs, totalFrames, 0, 0, x => x),
-                    breath = DiffSingerUtils.SampleCurve(phrase, phrase.breathiness, 0, frameMs, totalFrames, 0, 0, x => x)
+                    pitch = CustomF0Utils.SampleCurveWithConsonant(phrase, phrase.pitches, 0, frameMs, totalFrames, x => MusicMath.ToneToFreq(x * 0.01)),
+                    gen = CustomF0Utils.SampleCurveWithConsonant(phrase, phrase.gender, 0, frameMs, totalFrames, x => x),
+                    dyn = CustomF0Utils.SampleCurveWithConsonant(phrase, phrase.dynamics, 0, frameMs, totalFrames, x => x),
+                    tension = CustomF0Utils.SampleCurveWithConsonant(phrase, phrase.tension, 0, frameMs, totalFrames, x => x),
+                    breath = CustomF0Utils.SampleCurveWithConsonant(phrase, phrase.breathiness, 0, frameMs, totalFrames, x => x)
                 }
             };
 
@@ -226,21 +267,21 @@ namespace OpenUtau.Core.CustomRender {
             return "1";
         }
 
-        private byte[] SendToServer(string jsonData, CancellationTokenSource cancellation) {
+        private async Task<byte[]> SendToServerAsync(string jsonData, CancellationTokenSource cancellation) {
             try {
                 var content = new StringContent(jsonData, Encoding.UTF8, "application/json");
                 content.Headers.ContentType.CharSet = "utf-8";
                 Log.Information($"Sending JSON to server with UTF-8 encoding");
 
-                var response = httpClient.PostAsync(serverUrl, content, cancellation.Token).Result;
+                var response = await httpClient.PostAsync(serverUrl, content, cancellation.Token).ConfigureAwait(false);
 
                 if (response.IsSuccessStatusCode) {
                     Log.Information($"Server response: {response.StatusCode}");
-                    var wavData = response.Content.ReadAsByteArrayAsync().Result;
+                    var wavData = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
                     Log.Information($"Received wav data, size: {wavData.Length} bytes");
                     return wavData;
                 } else {
-                    var errorContent = response.Content.ReadAsStringAsync().Result;
+                    var errorContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                     Log.Error($"Server returned error: {response.StatusCode}, Content: {errorContent}");
                     return null;
                 }

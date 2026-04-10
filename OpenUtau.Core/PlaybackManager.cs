@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -11,6 +11,7 @@ using OpenUtau.Core.SignalChain;
 using OpenUtau.Core.Ustx;
 using OpenUtau.Core.Util;
 using OpenUtau.Core.Format;
+using OpenUtau.Core.CustomRender;
 using Serilog;
 
 namespace OpenUtau.Core {
@@ -284,12 +285,22 @@ namespace OpenUtau.Core {
         private void Render(UProject project, int tick, int endTick, int trackNo) {
             Task.Run(() => {
                 try {
-                    RenderEngine engine = new RenderEngine(project, startTick: tick, endTick: endTick, trackNo: trackNo);
-                    var result = engine.RenderProject(DocManager.Inst.MainScheduler, ref renderCancellation);
-                    if (result.Item1.IsPlayable()) {
-                        faders = result.Item2;
-                        StartPlayback(project.timeAxis.TickPosToMsPos(tick), result.Item1);
-                        PlayingMaster = true;
+                    if (CustomRenderEngine.ShouldUseCustomRenderEngine(project)) {
+                        var engine = new CustomRenderEngine(project, startTick: tick, endTick: endTick, trackNo: trackNo);
+                        var result = engine.RenderProject(DocManager.Inst.MainScheduler, ref renderCancellation);
+                        if (result.Item1.IsPlayable()) {
+                            faders = result.Item2;
+                            StartPlayback(project.timeAxis.TickPosToMsPos(tick), result.Item1);
+                            PlayingMaster = true;
+                        }
+                    } else {
+                        RenderEngine engine = new RenderEngine(project, startTick: tick, endTick: endTick, trackNo: trackNo);
+                        var result = engine.RenderProject(DocManager.Inst.MainScheduler, ref renderCancellation);
+                        if (result.Item1.IsPlayable()) {
+                            faders = result.Item2;
+                            StartPlayback(project.timeAxis.TickPosToMsPos(tick), result.Item1);
+                            PlayingMaster = true;
+                        }
                     }
                     StartingToPlay = false;
                 } catch (Exception e) {
@@ -377,8 +388,13 @@ namespace OpenUtau.Core {
 
         void SchedulePreRender() {
             Log.Information("SchedulePreRender");
-            var engine = new RenderEngine(DocManager.Inst.Project);
-            engine.PreRenderProject(ref renderCancellation);
+            if (CustomRenderEngine.ShouldUseCustomRenderEngine(DocManager.Inst.Project)) {
+                var engine = new CustomRenderEngine(DocManager.Inst.Project);
+                engine.PreRenderProject(ref renderCancellation);
+            } else {
+                var engine = new RenderEngine(DocManager.Inst.Project);
+                engine.PreRenderProject(ref renderCancellation);
+            }
         }
 
         #region ICmdSubscriber
