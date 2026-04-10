@@ -1,4 +1,4 @@
-﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using NAudio.Wave;
 using Newtonsoft.Json;
+using OpenUtau.Core.DiffSinger;
 using OpenUtau.Core.Format;
 using OpenUtau.Core.Render;
 using OpenUtau.Core.Ustx;
@@ -41,10 +42,12 @@ namespace OpenUtau.Core.CustomRender {
             };
         }
 
-        public Task<RenderResult> Render(RenderPhrase phrase, Progress progress, int trackNo, CancellationTokenSource cancellation, bool isPreRender) {
+        public Task<RenderResult> Render(RenderPhrase phrase, Progress progress, int trackNo,
+            CancellationTokenSource cancellation, bool isPreRender) {
             var task = Task.Run(() => {
                 try {
-                    string progressInfo = $"Track {trackNo + 1}: CustomServerRenderer \"{string.Join(" ", phrase.phones.Select(p => p.phoneme))}\"";
+                    string progressInfo =
+                        $"Track {trackNo + 1}: CustomServerRenderer \"{string.Join(" ", phrase.phones.Select(p => p.phoneme))}\"";
                     progress.Complete(0, progressInfo);
 
                     var wavPath = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav");
@@ -56,9 +59,11 @@ namespace OpenUtau.Core.CustomRender {
                         using (var waveStream = new WaveFileReader(wavPath)) {
                             result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
                         }
+
                         if (result.samples != null) {
                             Renderers.ApplyDynamics(phrase, result);
                         }
+
                         progress.Complete(phrase.phones.Length, progressInfo);
                         return result;
                     }
@@ -66,12 +71,13 @@ namespace OpenUtau.Core.CustomRender {
                     var jsonData = ConvertPhraseToJson(phrase);
                     Log.Information($"Sending JSON to server: {jsonData}");
 
-                    var response = SendToServer(jsonData, cancellation);
-                    if (response != null && response.Length > 0) {
-                        File.WriteAllBytes(wavPath, response);
+                    var wavData = SendToServer(jsonData, cancellation);
+                    if (wavData != null && wavData.Length > 0) {
+                        File.WriteAllBytes(wavPath, wavData);
                         using (var waveStream = new WaveFileReader(wavPath)) {
                             result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
                         }
+
                         if (result.samples != null) {
                             Renderers.ApplyDynamics(phrase, result);
                         }
@@ -92,7 +98,7 @@ namespace OpenUtau.Core.CustomRender {
 
         private string ConvertPhraseToJson(RenderPhrase phrase) {
             var phonemeList = new Dictionary<string, object>();
-            
+
             // 时间相关参数
             // duration_ms: 音素实际时长（毫秒），用于拉伸音素
             // position_ms: 音素在时间轴上的位置（毫秒）
@@ -103,43 +109,80 @@ namespace OpenUtau.Core.CustomRender {
             // Preutter: 音符开始前的发声时间（毫秒）
             // Overlap: 与前一个音素的重叠时间（毫秒）
 
-            
+
             // 各控制点的含义：
             // p0 (包络起点/左线)：
             // X: -preutter 毫秒（音符开始前）【辅音长度】【向前延伸】
             // Y: 0（音量从0开始）
-            
+
             // p1 (攻击点)：
             // X: p0.X + Math.Max(overlap, 5f) 毫秒【交叉长度】【从头向后延伸】
             // Y: atk * vol / 100f（攻击音量）
-            
+
             // p2 (稳定点/音符开始)：
             // X: Math.Max(0f, p1.X) 毫秒【音符起始点】
             // Y: vol（目标音量）
-            
+
             // p3 (衰减开始点)：
             // X: DurationMs - tailIntrude 毫秒【固定线】
             // Y: vol * (1f - dec / 100f)（衰减后的音量）
-            
+
             // p4 (包络终点/右线)：
             // X: p3.X + tailOverlap 毫秒【结尾衰减起始点】
             // Y: 0（音量衰减到0）
-            
+
+            // 重采样参数：固定hop_size=512，对应时间间隔
+            const int hopSize = 512;
+            const int sampleRate = 44100;
+            double frameMs = 1000.0 * hopSize / sampleRate;
+
+            // 计算目标帧数
+            int totalFrames = (int)Math.Ceiling(phrase.durationMs / frameMs);
+
             for (int i = 0; i < phrase.phones.Length; i++) {
                 var phone = phrase.phones[i];
                 var envelope = phone.envelope;
+                var noteFlags = new Dictionary<string, object> {
+                    { "vel", phone.velocity * 100.0 }
+                };
+                foreach (var flag in phone.flags) {
+                    noteFlags[flag.Item1] = flag.Item2 ?? 0;
+                }
+
+                var actualDur = envelope[3].X - envelope[2].X;
+                
+                float p3X, p3Y, p4X, p4Y;
+                
+                if (i < phrase.phones.Length - 1) {
+                    var nextPhone = phrase.phones[i + 1];
+                    var nextEnvelope = nextPhone.envelope;
+                    
+                    var nextPreutter = -nextEnvelope[0].X;
+                    var nextOverlap = nextEnvelope[1].X - nextEnvelope[0].X;
+                    var tailIntrude = Math.Max(nextPreutter, nextPreutter - nextOverlap);
+                    var tailOverlap = Math.Max(nextOverlap, 0);
+                    
+                    p3X = (float)(phone.durationMs - tailIntrude);
+                    p4X = (float)(p3X + tailOverlap);
+                    p3Y = envelope[3].Y;
+                    p4Y = envelope[4].Y;
+                } else {
+                    p3X = envelope[3].X;
+                    p3Y = envelope[3].Y;
+                    p4X = envelope[4].X;
+                    p4Y = envelope[4].Y;
+                }
+                
                 var phonemeData = new {
                     phoneme_name = phone.phoneme,
-                    phoneme_type = GetPhonemeType(phone.phoneme),
+                    // phoneme_type = GetPhonemeType(phone.phoneme),
                     note_pitch = MusicMath.GetToneName(phone.tone),
-                    dur_correction_ms = phone.durCorrectionMs,
+                    dur = phone.durationMs,
+                    actual_dur = actualDur,
                     // duration_ms = phone.durationMs,
                     // position_ms = phone.positionMs,
-                    Note_flags = new {
-                        vel = phone.velocity * 100.0,
-                        flags = phone.flags
-                    },
-                    phoneme_Mark = new {
+                    Note_flags = noteFlags,
+                    phoneme_oto = new {
                         audio_file_path = phone.oto?.File ?? "",
                         Offset = phone.oto?.Offset ?? 0.0,
                         Consonant = phone.oto?.Consonant ?? 0.0,
@@ -151,8 +194,8 @@ namespace OpenUtau.Core.CustomRender {
                         p0 = new { x = envelope[0].X, y = envelope[0].Y },
                         p1 = new { x = envelope[1].X, y = envelope[1].Y },
                         p2 = new { x = envelope[2].X, y = envelope[2].Y },
-                        p3 = new { x = envelope[3].X, y = envelope[3].Y },
-                        p4 = new { x = envelope[4].X, y = envelope[4].Y }
+                        p3 = new { x = p3X, y = p3Y },
+                        p4 = new { x = p4X, y = p4Y }
                     }
                 };
                 phonemeList[(i + 1).ToString()] = phonemeData;
@@ -161,14 +204,14 @@ namespace OpenUtau.Core.CustomRender {
             var jsonData = new {
                 out_wav = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav"),
                 wav_dur = phrase.durationMs,
-                render_mode = "normal",
+                // render_mode = "normal",
                 phoneme_list = phonemeList,
                 Dynamic_parameter = new {
-                    pitch = phrase.pitches?.Select(p => (double)p).ToList() ?? new List<double>(),
-                    gen = phrase.gender?.Select(g => (double)g).ToList() ?? new List<double>(),
-                    dyn = phrase.dynamics?.Select(d => (double)d).ToList() ?? new List<double>(),
-                    tension = phrase.tension?.Select(t => (double)t).ToList() ?? new List<double>(),
-                    breath = phrase.breathiness?.Select(b => (double)b).ToList() ?? new List<double>()
+                    pitch = DiffSingerUtils.SampleCurve(phrase, phrase.pitches, 0, frameMs, totalFrames, 0, 0, x => MusicMath.ToneToFreq(x * 0.01)),
+                    gen = DiffSingerUtils.SampleCurve(phrase, phrase.gender, 0, frameMs, totalFrames, 0, 0, x => x),
+                    dyn = DiffSingerUtils.SampleCurve(phrase, phrase.dynamics, 0, frameMs, totalFrames, 0, 0, x => x),
+                    tension = DiffSingerUtils.SampleCurve(phrase, phrase.tension, 0, frameMs, totalFrames, 0, 0, x => x),
+                    breath = DiffSingerUtils.SampleCurve(phrase, phrase.breathiness, 0, frameMs, totalFrames, 0, 0, x => x)
                 }
             };
 
@@ -190,15 +233,17 @@ namespace OpenUtau.Core.CustomRender {
                 Log.Information($"Sending JSON to server with UTF-8 encoding");
 
                 var response = httpClient.PostAsync(serverUrl, content, cancellation.Token).Result;
-                
+
                 if (response.IsSuccessStatusCode) {
                     Log.Information($"Server response: {response.StatusCode}");
-                    return response.Content.ReadAsByteArrayAsync().Result;
+                    var wavData = response.Content.ReadAsByteArrayAsync().Result;
+                    Log.Information($"Received wav data, size: {wavData.Length} bytes");
+                    return wavData;
                 } else {
                     var errorContent = response.Content.ReadAsStringAsync().Result;
                     Log.Error($"Server returned error: {response.StatusCode}, Content: {errorContent}");
                     return null;
-                } 
+                }
             } catch (Exception e) {
                 Log.Error(e, "Failed to send data to server");
                 return null;
@@ -211,6 +256,7 @@ namespace OpenUtau.Core.CustomRender {
             for (int i = 0; i < result.samples.Length; i++) {
                 result.samples[i] = 0;
             }
+
             return result;
         }
 
@@ -227,5 +273,6 @@ namespace OpenUtau.Core.CustomRender {
         }
 
         public override string ToString() => "CUSTOM_SERVER";
-    }
+        
+    } // <-- 添加这一行来关闭类
 }
