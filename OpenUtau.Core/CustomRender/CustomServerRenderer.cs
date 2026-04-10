@@ -1,4 +1,4 @@
-﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -177,8 +177,8 @@ namespace OpenUtau.Core.CustomRender {
             const int sampleRate = 44100;
             double frameMs = 1000.0 * hopSize / sampleRate;
 
-            // 计算目标帧数，添加缓冲帧确保结尾不丢失
-            int totalFrames = (int)Math.Ceiling((phrase.durationMs ) / frameMs);
+            // 🔧 计算目标帧数，考虑leadingMs前导时间，确保采样范围完整
+            int totalFrames = (int)Math.Ceiling((phrase.durationMs + phrase.leadingMs) / frameMs);
 
             for (int i = 0; i < phrase.phones.Length; i++) {
                 var phone = phrase.phones[i];
@@ -293,7 +293,9 @@ namespace OpenUtau.Core.CustomRender {
 
         private RenderResult FallbackRender(RenderPhrase phrase) {
             var result = Layout(phrase);
-            result.samples = new float[(int)(phrase.durationMs * 44.1)];
+            // 🔧 正确考虑leadingMs前导时间
+            double totalDurationMs = phrase.durationMs + phrase.leadingMs;
+            result.samples = new float[(int)(totalDurationMs * 44.1)];
             for (int i = 0; i < result.samples.Length; i++) {
                 result.samples[i] = 0;
             }

@@ -1,4 +1,4 @@
-﻿﻿using System;
+﻿﻿﻿using System;
 using OpenUtau.Core.Render;
 using OpenUtau.Core.Ustx;
 using OpenUtau.Core.Util;
@@ -32,7 +32,8 @@ namespace OpenUtau.Core.CustomRender {
         }
 
         private static double GetFramePositionMs(RenderPhrase phrase, int frameIndex, double frameMs) {
-            double positionMs = phrase.positionMs - phrase.leadingMs + frameIndex * frameMs;
+            // 🔧 Layout已经处理了leadingMs，这里只需要考虑辅音偏移
+            double positionMs = phrase.positionMs + frameIndex * frameMs;
             
             if (phrase.phones.Length == 0) {
                 return positionMs;
