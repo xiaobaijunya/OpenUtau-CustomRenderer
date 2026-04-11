@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -212,11 +212,10 @@ namespace OpenUtau.Core.CustomRender {
                 .SelectMany(req => req.phrases
                     .Zip(req.sources, (phrase, source) => Tuple.Create(phrase, source, req)))
                 .ToArray();
+            // 🔧 修改为从第一个依次往后渲染，按照原始顺序
             if (playing) {
                 var orderedTuples = tuples
-                    .Where(tuple => tuple.Item1.end > startTick)
-                    .OrderBy(tuple => tuple.Item1.end)
-                    .Concat(tuples.Where(tuple => tuple.Item1.end <= startTick))
+                    .OrderBy(tuple => tuple.Item1.position)
                     .ToArray();
                 tuples = orderedTuples;
             }
