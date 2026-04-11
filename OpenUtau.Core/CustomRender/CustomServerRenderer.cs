@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -72,7 +72,14 @@ namespace OpenUtau.Core.CustomRender {
 
                 var wavData = await SendToServerAsync(jsonData, cancellation).ConfigureAwait(false);
                 if (wavData != null && wavData.Length > 0) {
-                    File.WriteAllBytes(wavPath, wavData);
+                    // 🔧 使用FileStream确保文件完全写入并刷新缓冲区
+                    using (var fileStream = new FileStream(wavPath, FileMode.Create, FileAccess.Write, FileShare.Read)) {
+                        fileStream.Write(wavData, 0, wavData.Length);
+                        fileStream.Flush();
+                    }
+                    // 🔧 短暂延迟确保文件系统完成写入
+                    await Task.Delay(10).ConfigureAwait(false);
+                    
                     using (var waveStream = new WaveFileReader(wavPath)) {
                         result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
                     }
