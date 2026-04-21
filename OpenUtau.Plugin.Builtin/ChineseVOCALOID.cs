@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -126,35 +126,29 @@ namespace OpenUtau.Plugin.Builtin {
                         position = 0
                     });
                 }
+
+                if (isLastNote) {
+                    int endStart = totalDuration - GetLastPhonemeDuration(vowel, tone);
+                    string endPhoneme = GetMappedPhoneme($"{vowel} -", tone, color);
+                    phonemes.Add(new Phoneme {
+                        phoneme = endPhoneme,
+                        position = endStart
+                    });
+                }
             } else {
                 string firstPhoneme = currentPhonemes[0];
                 string stretchPhoneme = currentPhonemes[1];
                 string lastPhoneme = currentPhonemes[2];
 
-                if (isFirstNote) {
-                    string phoneme = GetMappedPhoneme($"- {firstPhoneme}", tone, color);
-                    phonemes.Add(new Phoneme {
-                        phoneme = phoneme,
-                        position = 0
-                    });
-                } else {
-                    string prevLyric = prevNeighbour.Value.lyric;
-                    string prevLastPhoneme = GetLastPhoneme(prevLyric);
-                    string phoneme = GetMappedPhoneme($"{prevLastPhoneme} {firstPhoneme}", tone, color);
-                    phonemes.Add(new Phoneme {
-                        phoneme = phoneme,
-                        position = 0
-                    });
-                }
-
                 int firstPhonemeDuration = GetFirstPhonemeDuration(firstPhoneme, tone);
+                
                 string startPhoneme = GetMappedPhoneme(lyric, tone, color);
                 phonemes.Add(new Phoneme {
                     phoneme = startPhoneme,
-                    position = firstPhonemeDuration
+                    position = 0
                 });
 
-                int stretchStart = firstPhonemeDuration + GetStartPhonemeDuration(lyric, tone);
+                int stretchStart = GetStartPhonemeDuration(lyric, tone);
                 string stretchPhonemeMapped = GetMappedPhoneme(stretchPhoneme, tone, color);
                 phonemes.Add(new Phoneme {
                     phoneme = stretchPhonemeMapped,
