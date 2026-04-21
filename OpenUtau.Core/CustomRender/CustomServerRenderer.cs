@@ -68,7 +68,7 @@ namespace OpenUtau.Core.CustomRender {
                 }
 
                 var jsonData = ConvertPhraseToJson(phrase);
-                Log.Information($"Sending JSON to server: {jsonData}");
+                // Log.Information($"Sending JSON to server: {jsonData}");
 
                 var wavData = await SendToServerAsync(jsonData, cancellation).ConfigureAwait(false);
                 if (wavData != null && wavData.Length > 0) {
@@ -264,7 +264,7 @@ namespace OpenUtau.Core.CustomRender {
             };
 
             var json = JsonConvert.SerializeObject(jsonData, Formatting.Indented);
-            Log.Information($"Generated JSON (UTF-8): {json}");
+            // Log.Information($"Generated JSON (UTF-8): {json}");
             return json;
         }
 
