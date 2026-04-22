@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -257,14 +257,8 @@ namespace OpenUtau.Plugin.Builtin {
 
         private int GetFirstPhonemeDuration(string phoneme, int tone, double? stretchRatio = null) {
             if (singer.TryGetMappedOto(phoneme, tone, "", out var oto)) {
-                int duration = timeAxis.MsToTickAt(oto.Preutter, 0);
-                if (oto.Overlap == 0 && duration < 120) {
-                    duration = Math.Min(120, duration * 2);
-                }
-                if (oto.Overlap < 0) {
-                    duration = timeAxis.MsToTickAt(oto.Preutter - oto.Overlap, 0);
-                }
-                return Convert.ToInt32(duration * (stretchRatio ?? 1));
+                int baseDuration = timeAxis.MsToTickAt(oto.Consonant - oto.Preutter, 0);
+                return Convert.ToInt32(baseDuration * (stretchRatio ?? 1));
             }
             return Convert.ToInt32(120 * (stretchRatio ?? 1));
         }
