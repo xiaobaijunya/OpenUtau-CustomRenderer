@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -102,6 +102,46 @@ namespace OpenUtau.Plugin.Builtin {
             string[] currentPhonemes;
             bool isVowelOnly = vowelDict.TryGetValue(lyric, out var vowel);
 
+            var phonemes = new List<Phoneme>();
+            int totalDuration = notes.Sum(n => n.duration);
+            
+            
+            bool isUnderscore = lyric.StartsWith("_");
+            if (isUnderscore) {
+                lyric = lyric.Substring(1);
+                var (Phoneme, endOto, endFound) = GetMappedPhoneme($"_{lyric}", tone, color);
+                phonemes.Add(new Phoneme {
+                    phoneme = Phoneme,
+                    position = 0
+                });
+                bool nextIsVowel = nextNeighbour != null && vowelDict.ContainsKey(nextNeighbour.Value.lyric);
+                if (!nextIsVowel) {
+                    if (isLastNote) {
+                        int endDuration = GetLastPhonemeDuration($"_{lyric}", tone, attr1.consonantStretchRatio);
+                        int endStart = totalDuration - Math.Min(totalDuration / 6, endDuration);
+                        var (endPhoneme, endOto2, endFound2) = GetMappedPhoneme($"{lyric} -", tone, color);
+                        phonemes.Add(new Phoneme {
+                            phoneme = endPhoneme,
+                            position = endStart
+                        });
+                    } else {
+                        string nextLyric = nextNeighbour.Value.lyric;
+                        string nextFirstPhoneme = GetFirstPhoneme(nextLyric);
+                        int nextFirstPhonemeDuration = GetFirstPhonemeDuration(nextLyric, nextNeighbour.Value.tone, attr1.consonantStretchRatio);
+                        int stretchEnd = totalDuration - Math.Min(totalDuration / 2, nextFirstPhonemeDuration);
+                        var (phoneme, oto, found) = GetMappedPhoneme($"{lyric} {nextFirstPhoneme}", tone, color);
+                        phonemes.Add(new Phoneme {
+                            phoneme = phoneme,
+                            position = stretchEnd
+                        });
+                    }
+                }
+                return new Result {
+                    phonemes = phonemes.ToArray()
+                };
+            }
+            
+            
             if (isVowelOnly) {
                 currentPhonemes = new string[] { vowel };
             } else if (!phonemeDict.TryGetValue(lyric, out currentPhonemes)) {
@@ -109,8 +149,6 @@ namespace OpenUtau.Plugin.Builtin {
                 return MakeSimpleResult(phoneme);
             }
             
-            var phonemes = new List<Phoneme>();
-            int totalDuration = notes.Sum(n => n.duration);
             
             if (isVowelOnly) {
                 if (isFirstNote) {
@@ -128,17 +166,29 @@ namespace OpenUtau.Plugin.Builtin {
                         position = 0
                     });
                 }
-
-                int vowelStartDuration = GetVowelDuration(vowel, tone, attr1.consonantStretchRatio);
+                
                 string stretchVowel = "_" + vowel;
+                string prevPhoneme = phonemes[phonemes.Count - 1].phoneme;
+                int vowelStartDuration = GetVowelDuration(prevPhoneme, tone, attr1.consonantStretchRatio);
                 var (stretchPhonemeMapped, stretchOto, stretchFound) = GetMappedPhoneme(stretchVowel, tone, color);
-                phonemes.Add(new Phoneme {
-                    phoneme = stretchPhonemeMapped,
-                    position = vowelStartDuration
-                });
+                if (vowelStartDuration < totalDuration / 2) {
+                    phonemes.Add(new Phoneme {
+                        phoneme = stretchPhonemeMapped,
+                        position = vowelStartDuration
+                    });
+                }
+                
+                
+                if (nextNoteIsUnderscore) {
+                    return new Result {
+                        phonemes = phonemes.ToArray()
+                    };
+                }
+
+                
 
                 if (isLastNote) {
-                    int vowelDuration = GetVowelDuration(vowel, tone, attr1.consonantStretchRatio);
+                    int vowelDuration = GetVowelDuration($"{vowel} -", tone, attr1.consonantStretchRatio);
                     int endStart = totalDuration - Math.Min(totalDuration / 6, vowelDuration);
                     var (endPhoneme, endOto, endFound) = GetMappedPhoneme($"{vowel} -", tone, color);
                     phonemes.Add(new Phoneme {
@@ -146,15 +196,19 @@ namespace OpenUtau.Plugin.Builtin {
                         position = endStart
                     });
                 } else {
-                    string nextLyric = nextNeighbour.Value.lyric;
-                    string nextFirstPhoneme = GetFirstPhoneme(nextLyric);
-                    int nextFirstPhonemeDuration = GetFirstPhonemeDuration(nextLyric, nextNeighbour.Value.tone, attr1.consonantStretchRatio);
-                    int stretchEnd = totalDuration - Math.Min(totalDuration / 2, nextFirstPhonemeDuration);
-                    var (phoneme, oto, found) = GetMappedPhoneme($"{vowel} {nextFirstPhoneme}", tone, color);
-                    phonemes.Add(new Phoneme {
-                        phoneme = phoneme,
-                        position = stretchEnd
-                    });
+                    bool nextIsVowel = nextNeighbour != null && vowelDict.ContainsKey(nextNeighbour.Value.lyric);
+                    if (!nextIsVowel) {
+                        string nextLyric = nextNeighbour.Value.lyric;
+                        string nextFirstPhoneme = GetFirstPhoneme(nextLyric);
+                        int nextFirstPhonemeDuration = GetFirstPhonemeDuration(nextLyric, nextNeighbour.Value.tone,
+                            attr1.consonantStretchRatio);
+                        int stretchEnd = totalDuration - Math.Min(totalDuration / 2, nextFirstPhonemeDuration);
+                        var (phoneme, oto, found) = GetMappedPhoneme($"{vowel} {nextFirstPhoneme}", tone, color);
+                        phonemes.Add(new Phoneme {
+                            phoneme = phoneme,
+                            position = stretchEnd
+                        });
+                    }
                 }
             } else {
                 string firstPhoneme = currentPhonemes[0];
@@ -176,13 +230,15 @@ namespace OpenUtau.Plugin.Builtin {
                     phoneme = startPhoneme2,
                     position = 0
                 });
-
-                int stretchStart = GetStartPhonemeDuration(lyric, tone, attr1.consonantStretchRatio);
+                
+                int stretchStart = GetVowelDuration(startPhoneme2, tone, attr1.consonantStretchRatio);
                 var (stretchPhonemeMapped, stretchOto2, stretchFound2) = GetMappedPhoneme(stretchPhoneme, tone, color);
-                phonemes.Add(new Phoneme {
-                    phoneme = stretchPhonemeMapped,
-                    position = stretchStart
-                });
+                if (stretchStart < totalDuration / 2) {
+                    phonemes.Add(new Phoneme {
+                        phoneme = stretchPhonemeMapped,
+                        position = stretchStart
+                    });
+                }
 
                 if (!nextNoteIsUnderscore) {
                     bool nextIsVowel = nextNeighbour != null && vowelDict.ContainsKey(nextNeighbour.Value.lyric);
@@ -208,6 +264,7 @@ namespace OpenUtau.Plugin.Builtin {
                         }
                     }
                 }
+                
             }
 
             return new Result {
@@ -291,10 +348,10 @@ namespace OpenUtau.Plugin.Builtin {
 
         private int GetVowelDuration(string vowel, int tone, double? stretchRatio = null) {
             if (singer.TryGetMappedOto(vowel, tone, "", out var oto)) {
-                int baseDuration = timeAxis.MsToTickAt(oto.Consonant - oto.Preutter, 0);
+                int baseDuration = timeAxis.MsToTickAt(oto.Consonant - oto.Preutter + 20, 0);
                 return Convert.ToInt32(baseDuration * (stretchRatio ?? 1));
             }
-            return Convert.ToInt32(30 * (stretchRatio ?? 1));
+            return Convert.ToInt32(0 * (stretchRatio ?? 1));
         }
 
 
