@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -17,13 +17,37 @@ using Serilog;
 
 namespace OpenUtau.Core.CustomRender {
     public class CustomServerRenderer : IRenderer {
-        private readonly string serverUrl;
+        public string ServerUrl { get; set; } = "http://localhost:8000";
+        public string Endpoint { get; set; } = "/synthesize";
         private readonly HttpClient httpClient;
 
-        public CustomServerRenderer(string serverUrl = "http://localhost:8000/synthesize") {
-            this.serverUrl = serverUrl;
+        public CustomServerRenderer() {
             this.httpClient = new HttpClient();
             this.httpClient.Timeout = TimeSpan.FromMinutes(5);
+        }
+
+        public CustomServerRenderer(string fullUrl) {
+            this.httpClient = new HttpClient();
+            this.httpClient.Timeout = TimeSpan.FromMinutes(5);
+            ParseFullUrl(fullUrl);
+        }
+
+        private void ParseFullUrl(string fullUrl) {
+            if (string.IsNullOrEmpty(fullUrl)) {
+                return;
+            }
+            try {
+                var uri = new Uri(fullUrl);
+                ServerUrl = uri.Scheme + "://" + uri.Authority;
+                Endpoint = uri.PathAndQuery;
+            } catch {
+                ServerUrl = fullUrl;
+                Endpoint = "/synthesize";
+            }
+        }
+
+        private string GetFullUrl() {
+            return ServerUrl.TrimEnd('/') + '/' + Endpoint.TrimStart('/');
         }
 
         public USingerType SingerType => USingerType.Classic;
@@ -72,14 +96,9 @@ namespace OpenUtau.Core.CustomRender {
 
                 var wavData = await SendToServerAsync(jsonData, cancellation).ConfigureAwait(false);
                 if (wavData != null && wavData.Length > 0) {
-                    // 🔧 使用FileStream确保文件完全写入并刷新缓冲区
-                    using (var fileStream = new FileStream(wavPath, FileMode.Create, FileAccess.Write, FileShare.Read)) {
-                        fileStream.Write(wavData, 0, wavData.Length);
-                        fileStream.Flush();
-                    }
-                    // 🔧 短暂延迟确保文件系统完成写入
-                    await Task.Delay(10).ConfigureAwait(false);
-                    
+                    // 直接写文件后立即读取，FileStream.Flush + FileShare.Read 确保一致性
+                    File.WriteAllBytes(wavPath, wavData);
+
                     using (var waveStream = new WaveFileReader(wavPath)) {
                         result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
                     }
@@ -105,7 +124,7 @@ namespace OpenUtau.Core.CustomRender {
             Progress progress,
             int trackNo,
             CancellationTokenSource cancellation,
-            string serverUrl = "http://localhost:8000/synthesize",
+            string serverUrl = "http://localhost:8000/synthesize", // Deprecated, use ServerUrl and Endpoint instead
             int maxConcurrency = 4) {
             if (phrases == null || phrases.Length == 0) {
                 return Array.Empty<RenderResult>();
@@ -147,44 +166,12 @@ namespace OpenUtau.Core.CustomRender {
         private string ConvertPhraseToJson(RenderPhrase phrase) {
             var phonemeList = new Dictionary<string, object>();
 
-            // 时间相关参数
-            // duration_ms: 音素实际时长（毫秒），用于拉伸音素
-            // position_ms: 音素在时间轴上的位置（毫秒）
-            // Oto参数（用户可调整的最终值）
-            // Offset: 左偏移量（音频文件中有效音素的起始位置，毫秒）
-            // Consonant: 辅音固定部分长度（毫秒）
-            // Cutoff: 右切割点（音频文件中有效音素的结束位置，毫秒）
-            // Preutter: 音符开始前的发声时间（毫秒）
-            // Overlap: 与前一个音素的重叠时间（毫秒）
-
-
-            // 各控制点的含义：
-            // p0 (包络起点/左线)：
-            // X: -preutter 毫秒（音符开始前）【辅音长度】【向前延伸】
-            // Y: 0（音量从0开始）
-
-            // p1 (攻击点)：
-            // X: p0.X + Math.Max(overlap, 5f) 毫秒【交叉长度】【从头向后延伸】
-            // Y: atk * vol / 100f（攻击音量）
-
-            // p2 (稳定点/音符开始)：
-            // X: Math.Max(0f, p1.X) 毫秒【音符起始点】
-            // Y: vol（目标音量）
-
-            // p3 (衰减开始点)：
-            // X: DurationMs - tailIntrude 毫秒【固定线】
-            // Y: vol * (1f - dec / 100f)（衰减后的音量）
-
-            // p4 (包络终点/右线)：
-            // X: p3.X + tailOverlap 毫秒【结尾衰减起始点】
-            // Y: 0（音量衰减到0）
-
             // 重采样参数：固定hop_size=512，对应时间间隔
             const int hopSize = 512;
             const int sampleRate = 44100;
             double frameMs = 1000.0 * hopSize / sampleRate;
 
-            // 🔧 计算目标帧数，考虑leadingMs前导时间，确保采样范围完整
+            // 计算目标帧数，考虑leadingMs前导时间
             int totalFrames = (int)Math.Ceiling((phrase.durationMs + phrase.leadingMs) / frameMs);
 
             for (int i = 0; i < phrase.phones.Length; i++) {
@@ -249,22 +236,24 @@ namespace OpenUtau.Core.CustomRender {
                 phonemeList[(i + 1).ToString()] = phonemeData;
             }
 
+            CustomF0Utils.SampleAllCurves(phrase, frameMs, totalFrames,
+                out var pitchCurve, out var genCurve, out var dynCurve,
+                out var tensionCurve, out var breathCurve);
+
             var jsonData = new {
                 out_wav = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav"),
                 wav_dur = phrase.durationMs,
-                // render_mode = "normal",
                 phoneme_list = phonemeList,
                 Dynamic_parameter = new {
-                    pitch = CustomF0Utils.SampleCurveWithConsonant(phrase, phrase.pitches, 0, frameMs, totalFrames, x => MusicMath.ToneToFreq(x * 0.01)),
-                    gen = CustomF0Utils.SampleCurveWithConsonant(phrase, phrase.gender, 0, frameMs, totalFrames, x => x),
-                    dyn = CustomF0Utils.SampleCurveWithConsonant(phrase, phrase.dynamics, 0, frameMs, totalFrames, x => x),
-                    tension = CustomF0Utils.SampleCurveWithConsonant(phrase, phrase.tension, 0, frameMs, totalFrames, x => x),
-                    breath = CustomF0Utils.SampleCurveWithConsonant(phrase, phrase.breathiness, 0, frameMs, totalFrames, x => x)
+                    pitch = pitchCurve,
+                    gen = genCurve,
+                    dyn = dynCurve,
+                    tension = tensionCurve,
+                    breath = breathCurve
                 }
             };
 
-            var json = JsonConvert.SerializeObject(jsonData, Formatting.Indented);
-            // Log.Information($"Generated JSON (UTF-8): {json}");
+            var json = JsonConvert.SerializeObject(jsonData, Formatting.None);
             return json;
         }
 
@@ -280,7 +269,8 @@ namespace OpenUtau.Core.CustomRender {
                 content.Headers.ContentType.CharSet = "utf-8";
                 Log.Information($"Sending JSON to server with UTF-8 encoding");
 
-                var response = await httpClient.PostAsync(serverUrl, content, cancellation.Token).ConfigureAwait(false);
+                var fullUrl = GetFullUrl();
+                var response = await httpClient.PostAsync(fullUrl, content, cancellation.Token).ConfigureAwait(false);
 
                 if (response.IsSuccessStatusCode) {
                     Log.Information($"Server response: {response.StatusCode}");

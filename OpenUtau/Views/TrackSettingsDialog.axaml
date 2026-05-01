@@ -10,6 +10,20 @@
   <Border Margin="{Binding $parent.WindowDecorationMargin}">
     <StackPanel Margin="8">
       <TextBlock Text="{DynamicResource warning.renderer}" IsVisible="{Binding IsNotClassic}"/>
+      
+      <TextBlock Text="Server URL" IsVisible="{Binding IsCustomServer}"/>
+      <TextBox HorizontalAlignment="Stretch" IsVisible="{Binding IsCustomServer}"
+               Text="{Binding ServerUrl}" Watermark="http://localhost:8000"/>
+      
+      <TextBlock Text="Endpoint" IsVisible="{Binding IsCustomServer}"/>
+      <TextBox HorizontalAlignment="Stretch" IsVisible="{Binding IsCustomServer}"
+               Text="{Binding Endpoint}" Watermark="/synthesize"/>
+      
+      <Grid ColumnDefinitions="*,8,*" IsVisible="{Binding IsCustomServer}">
+        <Button Grid.Column="2" Content="Set as Default"
+                HorizontalAlignment="Stretch" Command="{Binding SetDefaultServerUrl}"/>
+      </Grid>
+      
       <TextBlock Text="{DynamicResource prefs.rendering.resampler}" IsVisible="{Binding NeedsResampler}"/>
       <ComboBox Grid.Column="0" HorizontalAlignment="Stretch" IsVisible="{Binding NeedsResampler}"
                 ItemsSource="{Binding Resamplers}"

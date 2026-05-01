@@ -3,6 +3,7 @@ using System.Linq;
 using DynamicData.Binding;
 using OpenUtau.Classic;
 using OpenUtau.Core;
+using OpenUtau.Core.CustomRender;
 using OpenUtau.Core.Render;
 using OpenUtau.Core.Ustx;
 using OpenUtau.Core.Util;
@@ -19,6 +20,9 @@ namespace OpenUtau.App.ViewModels {
         [Reactive] public IWavtool? Wavtool { get; set; }
         [Reactive] public bool NeedsWavtool { get; set; }
         [Reactive] public bool IsNotClassic { get; set; }
+        [Reactive] public bool IsCustomServer { get; set; }
+        [Reactive] public string ServerUrl { get; set; } = "http://localhost:8000";
+        [Reactive] public string Endpoint { get; set; } = "/synthesize";
 
         ObservableCollectionExtended<IResampler> resamplers =
             new ObservableCollectionExtended<IResampler>();
@@ -49,6 +53,12 @@ namespace OpenUtau.App.ViewModels {
                 NeedsResampler = Renderers.CLASSIC == renderer;
                 NeedsWavtool = Renderers.CLASSIC == renderer;
                 IsNotClassic = Renderers.CLASSIC != renderer;
+                IsCustomServer = renderer == Renderers.CUSTOM_SERVER;
+                
+                if (IsCustomServer && Track.RendererSettings.Renderer is CustomServerRenderer customServerRenderer) {
+                    ServerUrl = customServerRenderer.ServerUrl;
+                    Endpoint = customServerRenderer.Endpoint;
+                }
             }
             this.WhenAnyValue(x => x.Resampler)
                 .Subscribe(resampler => {
@@ -90,16 +100,32 @@ namespace OpenUtau.App.ViewModels {
             }
         }
 
-        public void Finish() {
-            if (Renderers.CLASSIC != Track.RendererSettings.renderer) {
-                return;
+        public void SetDefaultServerUrl() {
+            if (IsCustomServer) {
+                Preferences.Default.DefaultServerUrl = ServerUrl;
+                Preferences.Default.DefaultEndpoint = Endpoint;
+                Preferences.Save();
             }
-            DocManager.Inst.StartUndoGroup("command.track.setting");
-            var settings = Track.RendererSettings.Clone();
-            settings.resampler = Resampler?.ToString() ?? string.Empty;
-            settings.wavtool = Wavtool?.ToString() ?? string.Empty;
-            DocManager.Inst.ExecuteCmd(new TrackChangeRenderSettingCommand(DocManager.Inst.Project, Track, settings));
-            DocManager.Inst.EndUndoGroup();
+        }
+        
+
+        public void Finish() {
+            if (Renderers.CLASSIC == Track.RendererSettings.renderer) {
+                DocManager.Inst.StartUndoGroup("command.track.setting");
+                var settings = Track.RendererSettings.Clone();
+                settings.resampler = Resampler?.ToString() ?? string.Empty;
+                settings.wavtool = Wavtool?.ToString() ?? string.Empty;
+                DocManager.Inst.ExecuteCmd(new TrackChangeRenderSettingCommand(DocManager.Inst.Project, Track, settings));
+                DocManager.Inst.EndUndoGroup();
+            } else if (IsCustomServer) {
+                DocManager.Inst.StartUndoGroup("command.track.setting");
+                var settings = Track.RendererSettings.Clone();
+                settings.renderer = Renderers.CUSTOM_SERVER;
+                settings.serverUrl = ServerUrl;
+                settings.endpoint = Endpoint;
+                DocManager.Inst.ExecuteCmd(new TrackChangeRenderSettingCommand(DocManager.Inst.Project, Track, settings));
+                DocManager.Inst.EndUndoGroup();
+            }
         }
     }
 }

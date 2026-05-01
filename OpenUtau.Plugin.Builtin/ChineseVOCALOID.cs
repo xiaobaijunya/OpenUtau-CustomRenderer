@@ -120,10 +120,20 @@ namespace OpenUtau.Plugin.Builtin {
                         int endDuration = GetLastPhonemeDuration($"_{lyric}", tone, attr1.consonantStretchRatio);
                         int endStart = totalDuration - Math.Min(totalDuration / 6, endDuration);
                         var (endPhoneme, endOto2, endFound2) = GetMappedPhoneme($"{lyric} -", tone, color);
-                        phonemes.Add(new Phoneme {
-                            phoneme = endPhoneme,
-                            position = endStart
-                        });
+                        if (endFound2)
+                        {
+                            phonemes.Add(new Phoneme {
+                                phoneme = endPhoneme,
+                                position = endStart
+                            });
+                        } else {
+                            var (endPhoneme2, endOto3, endFound3) = GetMappedPhoneme($"{lyric} R", tone, color);
+                            phonemes.Add(new Phoneme {
+                                phoneme = endPhoneme2,
+                                position = endStart
+                            });
+                        }
+                        
                     } else {
                         string nextLyric = nextNeighbour.Value.lyric;
                         string nextFirstPhoneme = GetFirstPhoneme(nextLyric);
@@ -191,10 +201,18 @@ namespace OpenUtau.Plugin.Builtin {
                     int vowelDuration = GetVowelDuration($"{vowel} -", tone, attr1.consonantStretchRatio);
                     int endStart = totalDuration - Math.Min(totalDuration / 6, vowelDuration);
                     var (endPhoneme, endOto, endFound) = GetMappedPhoneme($"{vowel} -", tone, color);
-                    phonemes.Add(new Phoneme {
-                        phoneme = endPhoneme,
-                        position = endStart
-                    });
+                    if (endFound) {
+                        phonemes.Add(new Phoneme {
+                            phoneme = endPhoneme,
+                            position = endStart
+                        });
+                    } else {
+                        var (endPhoneme2, endOto3, endFound3) = GetMappedPhoneme($"{vowel} R", tone, color);
+                        phonemes.Add(new Phoneme {
+                            phoneme = endPhoneme2,
+                            position = endStart
+                        });
+                    }
                 } else {
                     bool nextIsVowel = nextNeighbour != null && vowelDict.ContainsKey(nextNeighbour.Value.lyric);
                     if (!nextIsVowel) {
@@ -228,7 +246,10 @@ namespace OpenUtau.Plugin.Builtin {
                 var (startPhoneme2, startOto2, startFound2) = GetMappedPhoneme(lyric, tone, color);
                 phonemes.Add(new Phoneme {
                     phoneme = startPhoneme2,
-                    position = 0
+                    position = 0,
+                    expressions = new List<PhonemeExpression>() {
+                    new PhonemeExpression() { abbr = "CV", value = 1 }
+                }
                 });
                 
                 int stretchStart = GetVowelDuration(startPhoneme2, tone, attr1.consonantStretchRatio);
@@ -247,10 +268,18 @@ namespace OpenUtau.Plugin.Builtin {
                             int endDuration = GetLastPhonemeDuration(lastPhoneme, tone, attr1.consonantStretchRatio);
                             int endStart = totalDuration - Math.Min(totalDuration / 6, endDuration);
                             var (endPhoneme, endOto2, endFound2) = GetMappedPhoneme($"{lastPhoneme} -", tone, color);
-                            phonemes.Add(new Phoneme {
-                                phoneme = endPhoneme,
-                                position = endStart
-                            });
+                            if (endFound2) {
+                                phonemes.Add(new Phoneme {
+                                    phoneme = endPhoneme,
+                                    position = endStart
+                                });
+                            } else {
+                                var (endPhoneme2, endOto3, endFound3) = GetMappedPhoneme($"{lastPhoneme} R", tone, color);
+                                phonemes.Add(new Phoneme {
+                                    phoneme = endPhoneme2,
+                                    position = endStart
+                                });
+                            }
                         } else {
                             string nextLyric = nextNeighbour.Value.lyric;
                             string nextFirstPhoneme = GetFirstPhoneme(nextLyric);

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using OpenUtau.Api;
 using OpenUtau.Core.Render;
+using OpenUtau.Core.Util;
 using OpenUtau.Classic;
 using Serilog;
 using YamlDotNet.Serialization;
@@ -12,6 +13,8 @@ namespace OpenUtau.Core.Ustx {
         public string renderer;
         public string resampler;
         public string wavtool;
+        public string serverUrl;
+        public string endpoint;
 
         [YamlIgnore] public IRenderer Renderer { get; set; }
         [YamlIgnore] public IResampler Resampler { get; set; }
@@ -32,6 +35,18 @@ namespace OpenUtau.Core.Ustx {
             }
             if (renderer != Renderer?.ToString()) {
                 Renderer = Renderers.CreateRenderer(renderer);
+            }
+            if (renderer == Renderers.CUSTOM_SERVER) {
+                if (string.IsNullOrEmpty(serverUrl)) {
+                    serverUrl = Preferences.Default.DefaultServerUrl;
+                }
+                if (string.IsNullOrEmpty(endpoint)) {
+                    endpoint = Preferences.Default.DefaultEndpoint;
+                }
+                if (Renderer is CustomRender.CustomServerRenderer customServerRenderer) {
+                    customServerRenderer.ServerUrl = serverUrl;
+                    customServerRenderer.Endpoint = endpoint;
+                }
             }
             if (renderer == Renderers.CLASSIC) {
                 if (string.IsNullOrEmpty(resampler)) {
@@ -63,6 +78,8 @@ namespace OpenUtau.Core.Ustx {
                 renderer = renderer,
                 resampler = resampler,
                 wavtool = wavtool,
+                serverUrl = serverUrl,
+                endpoint = endpoint,
             };
         }
     }
