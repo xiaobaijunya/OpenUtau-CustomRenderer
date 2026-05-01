@@ -1,4 +1,4 @@
-﻿﻿﻿using System;
+﻿﻿using System;
 using System.Runtime.CompilerServices;
 using OpenUtau.Core.Render;
 using OpenUtau.Core.Ustx;
@@ -41,12 +41,12 @@ namespace OpenUtau.Core.CustomRender {
 
             for (int i = 0; i < totalFrames; i++) {
                 double posMs = GetFramePositionMs(phrase, i, frameMs);
-                int ticks = phrase.timeAxis.MsPosToTickPos(posMs) - positionOffset;
+                int ticks = (int)(phrase.timeAxis.MsPosToTickPos(posMs) - positionOffset);
                 int index = Math.Max(0, Math.Min(
-                    (hasPitch ? phrase.pitches.Length :
-                     hasGender ? phrase.gender.Length :
-                     hasDynamics ? phrase.dynamics.Length :
-                     hasTension ? phrase.tension.Length :
+                    (hasPitch ? phrase.pitches!.Length :
+                     hasGender ? phrase.gender!.Length :
+                     hasDynamics ? phrase.dynamics!.Length :
+                     hasTension ? phrase.tension!.Length :
                      phrase.breathiness!.Length) - 1,
                     (int)((double)ticks / Interval)));
 

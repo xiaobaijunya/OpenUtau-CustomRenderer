@@ -1,5 +1,6 @@
-﻿﻿﻿﻿﻿﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,7 +22,7 @@ namespace OpenUtau.Core.CustomRender {
                 .Cast<UVoicePart>()
                 .Any(part => {
                     var request = part.GetRenderRequest();
-                    return request != null && request.phrases.Any(p => p.renderer.ToString() == "CUSTOM_SERVER");
+                    return request != null && request.phrases.Any(p => p.renderer is CustomServerRenderer);
                 });
         }
         
@@ -132,18 +133,17 @@ namespace OpenUtau.Core.CustomRender {
             if (requests.Length == 0) {
                 return trackMixes;
             }
-            Enumerable.Range(0, requests.Max(req => req.trackNo) + 1)
-                .Select(trackNo => requests.Where(req => req.trackNo == trackNo).ToArray())
-                .ToList()
-                .ForEach(trackRequests => {
-                    if (trackRequests.Length == 0) {
-                        trackMixes.Add(null);
-                    } else {
-                        RenderRequests(trackRequests, newCancellation);
-                        var mix = new WaveMix(trackRequests.Select(req => req.mix).ToArray());
-                        trackMixes.Add(mix);
-                    }
-                });
+            int maxTrackNo = requests.Max(req => req.trackNo);
+            for (int trackNo = 0; trackNo <= maxTrackNo; trackNo++) {
+                var trackRequests = requests.Where(req => req.trackNo == trackNo).ToArray();
+                if (trackRequests.Length == 0) {
+                    trackMixes.Add(null);
+                } else {
+                    RenderRequests(trackRequests, newCancellation);
+                    var mix = new WaveMix(trackRequests.Select(req => req.mix).ToArray());
+                    trackMixes.Add(mix);
+                }
+            }
             return trackMixes;
         }
 
@@ -154,13 +154,15 @@ namespace OpenUtau.Core.CustomRender {
                 oldCancellation.Cancel();
                 oldCancellation.Dispose();
             }
-            Task.Run(() => {
+            _ = Task.Run(async () => {
                 try {
-                    Thread.Sleep(200);
+                    await Task.Delay(200, newCancellation.Token).ConfigureAwait(false);
                     if (newCancellation.Token.IsCancellationRequested) {
                         return;
                     }
                     RenderRequests(PrepareRequests(), newCancellation);
+                } catch (OperationCanceledException) {
+                    // Cancellation is expected, ignore
                 } catch (Exception e) {
                     if (!newCancellation.IsCancellationRequested) {
                         Log.Error(e, "Failed to pre-render.");
@@ -179,7 +181,7 @@ namespace OpenUtau.Core.CustomRender {
                     .Select(part => part as UVoicePart)
                     .Select(part => part.GetRenderRequest())
                     .Where(request => request != null)
-                    .Where(request => request.phrases.Any(p => p.renderer.ToString() == "CUSTOM_SERVER"))
+                    .Where(request => request.phrases.Any(p => p.renderer is CustomServerRenderer))
                     .ToArray();
             }
             foreach (var request in requests) {
@@ -212,51 +214,77 @@ namespace OpenUtau.Core.CustomRender {
                 .SelectMany(req => req.phrases
                     .Zip(req.sources, (phrase, source) => Tuple.Create(phrase, source, req)))
                 .ToArray();
-            // 🔧 修改为从第一个依次往后渲染，按照原始顺序
             if (playing) {
-                var orderedTuples = tuples
-                    .OrderBy(tuple => tuple.Item1.position)
-                    .ToArray();
-                tuples = orderedTuples;
+                Array.Sort(tuples, (a, b) => a.Item1.position.CompareTo(b.Item1.position));
             }
             var progress = new Progress(tuples.Sum(t => t.Item1.phones.Length));
-            
+
             var phrases = tuples.Select(t => t.Item1).ToArray();
             var sources = tuples.Select(t => t.Item2).ToArray();
             var request = tuples.First().Item3;
-            
-            var renderTasks = new List<Task<(int index, RenderResult result)>>();
-            var semaphore = new SemaphoreSlim(maxConcurrency);
-            
+
+            var customRenderer = new CustomServerRenderer(serverUrl);
+            var httpSemaphore = new SemaphoreSlim(maxConcurrency);
+            var tasks = new Task<(int index, RenderResult result)>[phrases.Length];
+
             for (int i = 0; i < phrases.Length; i++) {
-                int index = i;
-                var phrase = phrases[index];
-                
-                var task = Task.Run(async () => {
-                    await semaphore.WaitAsync(cancellation.Token).ConfigureAwait(false);
+                int idx = i;
+                var phrase = phrases[idx];
+
+                tasks[idx] = Task.Run(async () => {
+                    // ===== Phase 1: 检查缓存 + 生成 JSON (CPU密集, 无限制) =====
+                    // 所有 phrase 的 JSON 生成同时跑满 CPU，不受 semaphore 限制
+                    string? preJson = null;
+                    bool needHttp = false;
+
+                    if (phrase.renderer is CustomServerRenderer) {
+                        var wavPath = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav");
+                        if (!File.Exists(wavPath)) {
+                            preJson = CustomServerRenderer.ConvertPhraseToJson(phrase);
+                            needHttp = true;
+                        }
+                    }
+
+                    // ===== Phase 2: HTTP 请求 (I/O密集, semaphore限制并发) =====
+                    if (needHttp) {
+                        await httpSemaphore.WaitAsync(cancellation.Token).ConfigureAwait(false);
+                    }
                     try {
                         RenderResult result;
-                        if (phrase.renderer.ToString() == "CUSTOM_SERVER") {
-                            var renderer = new CustomServerRenderer(serverUrl);
-                            result = await renderer.Render(phrase, progress, request.trackNo, cancellation, false).ConfigureAwait(false);
+                        if (phrase.renderer is CustomServerRenderer) {
+                            result = await customRenderer.RenderImpl(phrase, progress, request.trackNo, cancellation, false, preJson).ConfigureAwait(false);
                         } else {
                             result = await phrase.renderer.Render(phrase, progress, request.trackNo, cancellation, false).ConfigureAwait(false);
                         }
-                        return (index, result);
+                        return (idx, result);
                     } finally {
-                        semaphore.Release();
+                        if (needHttp) {
+                            httpSemaphore.Release();
+                        }
                     }
                 }, cancellation.Token);
-                renderTasks.Add(task);
             }
-            
-            while (renderTasks.Count > 0 && !cancellation.IsCancellationRequested) {
-                var completedTask = await Task.WhenAny(renderTasks).ConfigureAwait(false);
-                renderTasks.Remove(completedTask);
-                
-                var (index, result) = await completedTask.ConfigureAwait(false);
-                sources[index].SetSamples(result.samples);
-                
+
+            if (playing) {
+                // 播放模式：按位置顺序渐进式更新
+                var remaining = new List<Task<(int index, RenderResult result)>>(tasks);
+                while (remaining.Count > 0 && !cancellation.IsCancellationRequested) {
+                    var completedTask = await Task.WhenAny(remaining).ConfigureAwait(false);
+                    remaining.Remove(completedTask);
+                    var (index, result) = await completedTask.ConfigureAwait(false);
+                    sources[index].SetSamples(result.samples);
+                }
+                if (request.sources.All(s => s.HasSamples)) {
+                    request.part.SetMix(request.mix);
+                    DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));
+                }
+            } else {
+                // 非播放模式：一次性处理所有结果
+                var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+                foreach (var (index, result) in results) {
+                    sources[index].SetSamples(result.samples);
+                    // 每次设置后检查是否全部完成（兼容多 track 场景）
+                }
                 if (request.sources.All(s => s.HasSamples)) {
                     request.part.SetMix(request.mix);
                     DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));

@@ -19,16 +19,15 @@ namespace OpenUtau.Core.CustomRender {
     public class CustomServerRenderer : IRenderer {
         public string ServerUrl { get; set; } = "http://localhost:8000";
         public string Endpoint { get; set; } = "/synthesize";
-        private readonly HttpClient httpClient;
+        // HttpClient 设计为单例复用，避免为每个请求创建新的连接池
+        private static readonly HttpClient sharedHttpClient = new HttpClient {
+            Timeout = TimeSpan.FromMinutes(5)
+        };
 
         public CustomServerRenderer() {
-            this.httpClient = new HttpClient();
-            this.httpClient.Timeout = TimeSpan.FromMinutes(5);
         }
 
         public CustomServerRenderer(string fullUrl) {
-            this.httpClient = new HttpClient();
-            this.httpClient.Timeout = TimeSpan.FromMinutes(5);
             ParseFullUrl(fullUrl);
         }
 
@@ -66,8 +65,15 @@ namespace OpenUtau.Core.CustomRender {
             };
         }
 
-        public async Task<RenderResult> Render(RenderPhrase phrase, Progress progress, int trackNo,
+        // IRenderer 接口实现（5参数）
+        public Task<RenderResult> Render(RenderPhrase phrase, Progress progress, int trackNo,
             CancellationTokenSource cancellation, bool isPreRender) {
+            return RenderImpl(phrase, progress, trackNo, cancellation, isPreRender, null);
+        }
+
+        // 内部重载：支持传入预生成的 JSON（CustomRenderEngine 流水线使用）
+        internal async Task<RenderResult> RenderImpl(RenderPhrase phrase, Progress progress, int trackNo,
+            CancellationTokenSource cancellation, bool isPreRender, string? preGeneratedJson) {
             try {
                 string progressInfo =
                     $"Track {trackNo + 1}: CustomServerRenderer \"{string.Join(" ", phrase.phones.Select(p => p.phoneme))}\"";
@@ -91,12 +97,10 @@ namespace OpenUtau.Core.CustomRender {
                     return result;
                 }
 
-                var jsonData = ConvertPhraseToJson(phrase);
-                // Log.Information($"Sending JSON to server: {jsonData}");
+                var jsonData = preGeneratedJson ?? ConvertPhraseToJson(phrase);
 
                 var wavData = await SendToServerAsync(jsonData, cancellation).ConfigureAwait(false);
                 if (wavData != null && wavData.Length > 0) {
-                    // 直接写文件后立即读取，FileStream.Flush + FileShare.Read 确保一致性
                     File.WriteAllBytes(wavPath, wavData);
 
                     using (var waveStream = new WaveFileReader(wavPath)) {
@@ -124,18 +128,15 @@ namespace OpenUtau.Core.CustomRender {
             Progress progress,
             int trackNo,
             CancellationTokenSource cancellation,
-            string serverUrl = "http://localhost:8000/synthesize", // Deprecated, use ServerUrl and Endpoint instead
+            string serverUrl = "http://localhost:8000/synthesize",
             int maxConcurrency = 4) {
             if (phrases == null || phrases.Length == 0) {
                 return Array.Empty<RenderResult>();
             }
 
-            var httpClient = new HttpClient();
-            httpClient.Timeout = TimeSpan.FromMinutes(5);
-
             var results = new RenderResult[phrases.Length];
-            var tasks = new List<Task<(int index, RenderResult result)>>();
             var semaphore = new SemaphoreSlim(maxConcurrency);
+            var tasks = new List<Task<(int index, RenderResult result)>>(phrases.Length);
 
             for (int i = 0; i < phrases.Length; i++) {
                 int index = i;
@@ -159,15 +160,14 @@ namespace OpenUtau.Core.CustomRender {
                 results[index] = result;
             }
 
-            httpClient.Dispose();
             return results;
         }
 
-        private string ConvertPhraseToJson(RenderPhrase phrase) {
+        internal static string ConvertPhraseToJson(RenderPhrase phrase) {
             var phonemeList = new Dictionary<string, object>();
 
-            // 重采样参数：固定hop_size=512，对应时间间隔
-            const int hopSize = 512;
+            // 帧移参数：hop_size=128，对应~2.9ms/帧
+            const int hopSize = 128;
             const int sampleRate = 44100;
             double frameMs = 1000.0 * hopSize / sampleRate;
 
@@ -241,6 +241,9 @@ namespace OpenUtau.Core.CustomRender {
                 out var tensionCurve, out var breathCurve);
 
             var jsonData = new {
+                hop_size = hopSize,
+                sample_rate = sampleRate,
+                frame_ms = frameMs,
                 out_wav = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav"),
                 wav_dur = phrase.durationMs,
                 phoneme_list = phonemeList,
@@ -257,26 +260,16 @@ namespace OpenUtau.Core.CustomRender {
             return json;
         }
 
-        private string GetPhonemeType(string phoneme) {
-            // var vowels = new HashSet<string> { "a", "i", "u", "e", "o", "A", "I", "U", "E", "O", "N" };
-            // return vowels.Contains(phoneme) ? "V" : "C";
-            return "1";
-        }
-
-        private async Task<byte[]> SendToServerAsync(string jsonData, CancellationTokenSource cancellation) {
+        private async Task<byte[]?> SendToServerAsync(string jsonData, CancellationTokenSource cancellation) {
             try {
                 var content = new StringContent(jsonData, Encoding.UTF8, "application/json");
-                content.Headers.ContentType.CharSet = "utf-8";
-                Log.Information($"Sending JSON to server with UTF-8 encoding");
 
                 var fullUrl = GetFullUrl();
-                var response = await httpClient.PostAsync(fullUrl, content, cancellation.Token).ConfigureAwait(false);
+                var response = await sharedHttpClient.PostAsync(fullUrl, content, cancellation.Token).ConfigureAwait(false);
 
                 if (response.IsSuccessStatusCode) {
-                    Log.Information($"Server response: {response.StatusCode}");
-                    var wavData = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-                    Log.Information($"Received wav data, size: {wavData.Length} bytes");
-                    return wavData;
+                    Log.Debug($"CustomServerRenderer received {response.Content.Headers.ContentLength ?? 0} bytes");
+                    return await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
                 } else {
                     var errorContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                     Log.Error($"Server returned error: {response.StatusCode}, Content: {errorContent}");
@@ -290,18 +283,14 @@ namespace OpenUtau.Core.CustomRender {
 
         private RenderResult FallbackRender(RenderPhrase phrase) {
             var result = Layout(phrase);
-            // 🔧 正确考虑leadingMs前导时间
+            // new float[] 自动初始化为0，无需手动填充
             double totalDurationMs = phrase.durationMs + phrase.leadingMs;
             result.samples = new float[(int)(totalDurationMs * 44.1)];
-            for (int i = 0; i < result.samples.Length; i++) {
-                result.samples[i] = 0;
-            }
-
             return result;
         }
 
         public RenderPitchResult LoadRenderedPitch(RenderPhrase phrase) {
-            return null;
+            return null!;
         }
 
         public List<RenderRealCurveResult> LoadRenderedRealCurves(RenderPhrase phrase) {
