@@ -34,6 +34,7 @@ namespace OpenUtau.Core.Format {
         public const string SHFC = "shfc";
         public const string TENC = "tenc";
         public const string VOIC = "voic";
+        public const string PHTP = "phtp";
 
         public static readonly string[] required = { DYN, PITD, CLR, ENG, VEL, VOL, ATK, DEC };
 
@@ -60,6 +61,7 @@ namespace OpenUtau.Core.Format {
             project.RegisterExpression(new UExpressionDescriptor("tone shift (curve)", SHFC, -1200, 1200, 0) { type = UExpressionType.Curve });
             project.RegisterExpression(new UExpressionDescriptor("tension (curve)", TENC, -100, 100, 0) { type = UExpressionType.Curve });
             project.RegisterExpression(new UExpressionDescriptor("voicing (curve)", VOIC, 0, 100, 100) { type = UExpressionType.Curve });
+            project.RegisterExpression(new UExpressionDescriptor("phoneme type", PHTP, false, new string[] { "","-C", "CV", "VC", "_V", "VV" }));
 
             string message = string.Empty;
             if (ValidateExpression(project, "g", GEN)) {

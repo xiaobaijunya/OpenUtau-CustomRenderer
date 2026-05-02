@@ -75,6 +75,9 @@ namespace OpenUtau.Core.Render {
         // voicevox & enunu args
         public readonly int toneShift;
 
+        // phoneme type (PHTP)
+        public readonly int phonemeType;
+
         public readonly UOto oto;
         public readonly ulong hash;
 
@@ -127,6 +130,7 @@ namespace OpenUtau.Core.Render {
             envelope = phoneme.envelope.data.ToArray();
             direct = phoneme.GetExpression(project, track, Format.Ustx.DIR).Item1 == 1;
             toneShift = (int)phoneme.GetExpression(project, track, Format.Ustx.SHFT).Item1;
+            phonemeType = (int)phoneme.GetExpression(project, track, Format.Ustx.PHTP).Item1;
 
             oto = phoneme.oto;
             hash = Hash();
@@ -138,6 +142,7 @@ namespace OpenUtau.Core.Render {
                     writer.Write(duration);
                     writer.Write(phoneme ?? string.Empty);
                     writer.Write(tone);
+                    writer.Write(phonemeType);
 
                     writer.Write(resampler ?? string.Empty);
                     foreach (var flag in flags) {

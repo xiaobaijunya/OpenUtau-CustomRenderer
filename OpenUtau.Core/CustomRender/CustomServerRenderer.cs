@@ -164,39 +164,93 @@ namespace OpenUtau.Core.CustomRender {
         }
 
         internal static string ConvertPhraseToJson(RenderPhrase phrase) {
-            var phonemeList = new Dictionary<string, object>();
-
-            // 帧移参数：hop_size=128，对应~2.9ms/帧
-            const int hopSize = 128;
+            // 帧移参数：hop_size=256，对应~5.8ms/帧
+            const int hopSize = 256;
             const int sampleRate = 44100;
             double frameMs = 1000.0 * hopSize / sampleRate;
 
             // 计算目标帧数，考虑leadingMs前导时间
             int totalFrames = (int)Math.Ceiling((phrase.durationMs + phrase.leadingMs) / frameMs);
 
+            // === 构建音素列表 ===
+            var phonemeList = BuildPhonemeList(phrase);
+
+            // === 自动采样所有曲线参数 ===
+            var curves = CustomF0Utils.SampleAllCurves(phrase, frameMs, totalFrames);
+
+            // === 动态参数：每个参数始终保留，如果全为默认值则传 null ===
+            var dynamicParam = new Dictionary<string, object?>();
+
+            // 已知的标准曲线，始终保留
+            var knownCurves = new[] { "pitd", "genc", "brec", "tenc", "voic" };
+            foreach (var abbr in knownCurves) {
+                if (curves.TryGetValue(abbr, out var data) && !CustomF0Utils.IsCurveDefault(abbr, data)) {
+                    dynamicParam[abbr] = data;
+                } else {
+                    dynamicParam[abbr] = null;
+                }
+            }
+
+            // 自定义曲线（来自 phrase.curves）：同样处理
+            foreach (var kvp in curves) {
+                if (Array.IndexOf(knownCurves, kvp.Key) >= 0) {
+                    continue; // 已在上面处理
+                }
+                dynamicParam[kvp.Key] = CustomF0Utils.IsCurveDefault(kvp.Key, kvp.Value)
+                    ? null
+                    : kvp.Value;
+            }
+
+            object dynamicParameter = dynamicParam;
+
+            var jsonData = new {
+                hop_size = hopSize,
+                sample_rate = sampleRate,
+                frame_ms = frameMs,
+                out_wav = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav"),
+                wav_dur = phrase.durationMs,
+                phoneme_list = phonemeList,
+                Dynamic_parameter = dynamicParameter
+            };
+
+            var json = JsonConvert.SerializeObject(jsonData, Formatting.None);
+            return json;
+        }
+
+        /// <summary>
+        /// 构建音素列表，每个音素包含所有 flags 和标准属性。
+        /// </summary>
+        private static Dictionary<string, object> BuildPhonemeList(RenderPhrase phrase) {
+            var phonemeList = new Dictionary<string, object>();
+
             for (int i = 0; i < phrase.phones.Length; i++) {
                 var phone = phrase.phones[i];
                 var envelope = phone.envelope;
+
+                // 自动收集所有 flags：标准属性 + phoneme.flags（来自项目表达式）
                 var noteFlags = new Dictionary<string, object> {
-                    { "vel", phone.velocity * 100.0 }
+                    { "vel", phone.velocity * 100.0 },
+                    { "vol", phone.volume * 100.0 },
+                    { "mod", phone.modulation * 100.0 },
+                    { "shft", phone.toneShift },
+                    { "phtp", phone.phonemeType }
                 };
                 foreach (var flag in phone.flags) {
+                    // flag: Tuple<flagName, int?, abbr>
                     noteFlags[flag.Item1] = flag.Item2 ?? 0;
                 }
 
-                var actualDur = envelope[3].X - envelope[2].X;
-                
                 float p3X, p3Y, p4X, p4Y;
-                
+
                 if (i < phrase.phones.Length - 1) {
                     var nextPhone = phrase.phones[i + 1];
                     var nextEnvelope = nextPhone.envelope;
-                    
+
                     var nextPreutter = -nextEnvelope[0].X;
                     var nextOverlap = nextEnvelope[1].X - nextEnvelope[0].X;
                     var tailIntrude = Math.Max(nextPreutter, nextPreutter - nextOverlap);
                     var tailOverlap = Math.Max(nextOverlap, 0);
-                    
+
                     p3X = (float)(phone.durationMs - tailIntrude);
                     p4X = (float)(p3X + tailOverlap);
                     p3Y = envelope[3].Y;
@@ -207,15 +261,11 @@ namespace OpenUtau.Core.CustomRender {
                     p4X = envelope[4].X;
                     p4Y = envelope[4].Y;
                 }
-                
+
                 var phonemeData = new {
                     phoneme_name = phone.phoneme,
-                    // phoneme_type = GetPhonemeType(phone.phoneme),
                     note_pitch = MusicMath.GetToneName(phone.tone),
-                    dur = phone.durationMs,
-                    actual_dur = actualDur,
-                    // duration_ms = phone.durationMs,
-                    // position_ms = phone.positionMs,
+                    dur = envelope[4].X,
                     Note_flags = noteFlags,
                     phoneme_oto = new {
                         audio_file_path = phone.oto?.File ?? "",
@@ -236,28 +286,7 @@ namespace OpenUtau.Core.CustomRender {
                 phonemeList[(i + 1).ToString()] = phonemeData;
             }
 
-            CustomF0Utils.SampleAllCurves(phrase, frameMs, totalFrames,
-                out var pitchCurve, out var genCurve, out var dynCurve,
-                out var tensionCurve, out var breathCurve);
-
-            var jsonData = new {
-                hop_size = hopSize,
-                sample_rate = sampleRate,
-                frame_ms = frameMs,
-                out_wav = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav"),
-                wav_dur = phrase.durationMs,
-                phoneme_list = phonemeList,
-                Dynamic_parameter = new {
-                    pitch = pitchCurve,
-                    gen = genCurve,
-                    dyn = dynCurve,
-                    tension = tensionCurve,
-                    breath = breathCurve
-                }
-            };
-
-            var json = JsonConvert.SerializeObject(jsonData, Formatting.None);
-            return json;
+            return phonemeList;
         }
 
         private async Task<byte[]?> SendToServerAsync(string jsonData, CancellationTokenSource cancellation) {

@@ -86,13 +86,40 @@ namespace OpenUtau.Plugin.Builtin {
                     var prevLyric = prevNeighbour.Value.lyric;
                     if (phonemeDict.TryGetValue(prevLyric, out var prevPhonemes)) {
                         var (phoneme, oto, found) = GetMappedPhoneme($"{prevPhonemes[2]} -", tone, color);
-                        return MakeSimpleResult(phoneme);
+                        return new Result() {
+                            phonemes = new Phoneme[] {
+                                new Phoneme() {
+                                    phoneme = phoneme,
+                                    expressions = new List<PhonemeExpression>() {
+                                        new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 3 }
+                                    }
+                                }
+                            }
+                        };
                     } else if (vowelDict.TryGetValue(prevLyric, out var prevVowel)) {
                         var (phoneme, oto, found) = GetMappedPhoneme($"{prevVowel} -", tone, color);
-                        return MakeSimpleResult(phoneme);
+                        return new Result() {
+                            phonemes = new Phoneme[] {
+                                new Phoneme() {
+                                    phoneme = phoneme,
+                                    expressions = new List<PhonemeExpression>() {
+                                        new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 3 }
+                                    }
+                                }
+                            }
+                        };
                     }
                 }
-                return MakeSimpleResult("-");
+                return new Result() {
+                    phonemes = new Phoneme[] {
+                        new Phoneme() {
+                            phoneme = "-",
+                            expressions = new List<PhonemeExpression>() {
+                                new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 3 }
+                            }
+                        }
+                    }
+                };
             }
 
             bool isFirstNote = prevNeighbour == null;
@@ -112,7 +139,10 @@ namespace OpenUtau.Plugin.Builtin {
                 var (Phoneme, endOto, endFound) = GetMappedPhoneme($"_{lyric}", tone, color);
                 phonemes.Add(new Phoneme {
                     phoneme = Phoneme,
-                    position = 0
+                    position = 0,
+                    expressions = new List<PhonemeExpression>() {
+                        new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 4 }
+                    }
                 });
                 bool nextIsVowel = nextNeighbour != null && vowelDict.ContainsKey(nextNeighbour.Value.lyric);
                 if (!nextIsVowel) {
@@ -124,13 +154,19 @@ namespace OpenUtau.Plugin.Builtin {
                         {
                             phonemes.Add(new Phoneme {
                                 phoneme = endPhoneme,
-                                position = endStart
+                                position = endStart,
+                                expressions = new List<PhonemeExpression>() {
+                                    new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 3 }
+                                }
                             });
                         } else {
                             var (endPhoneme2, endOto3, endFound3) = GetMappedPhoneme($"{lyric} R", tone, color);
                             phonemes.Add(new Phoneme {
                                 phoneme = endPhoneme2,
-                                position = endStart
+                                position = endStart,
+                                expressions = new List<PhonemeExpression>() {
+                                    new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 3 }
+                                }
                             });
                         }
                         
@@ -142,7 +178,10 @@ namespace OpenUtau.Plugin.Builtin {
                         var (phoneme, oto, found) = GetMappedPhoneme($"{lyric} {nextFirstPhoneme}", tone, color);
                         phonemes.Add(new Phoneme {
                             phoneme = phoneme,
-                            position = stretchEnd
+                            position = stretchEnd,
+                            expressions = new List<PhonemeExpression>() {
+                                new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 3 }
+                            }
                         });
                     }
                 }
@@ -156,7 +195,16 @@ namespace OpenUtau.Plugin.Builtin {
                 currentPhonemes = new string[] { vowel };
             } else if (!phonemeDict.TryGetValue(lyric, out currentPhonemes)) {
                 var (phoneme, oto, found) = GetMappedPhoneme(lyric, tone, color);
-                return MakeSimpleResult(phoneme);
+                return new Result() {
+                    phonemes = new Phoneme[] {
+                        new Phoneme() {
+                            phoneme = phoneme,
+                            expressions = new List<PhonemeExpression>() {
+                                new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 2 }
+                            }
+                        }
+                    }
+                };
             }
             
             
@@ -165,7 +213,10 @@ namespace OpenUtau.Plugin.Builtin {
                     var (phoneme, oto, found) = GetMappedPhoneme($"- {vowel}", tone, color);
                     phonemes.Add(new Phoneme {
                         phoneme = phoneme,
-                        position = 0
+                        position = 0,
+                        expressions = new List<PhonemeExpression>() {
+                            new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 1 }
+                        }
                     });
                 } else {
                     string prevLyric = prevNeighbour.Value.lyric;
@@ -173,7 +224,10 @@ namespace OpenUtau.Plugin.Builtin {
                     var (phoneme, oto, found) = GetMappedPhoneme($"{prevLastPhoneme} {vowel}", tone, color);
                     phonemes.Add(new Phoneme {
                         phoneme = phoneme,
-                        position = 0
+                        position = 0,
+                        expressions = new List<PhonemeExpression>() {
+                            new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 5 }
+                        }
                     });
                 }
                 
@@ -184,7 +238,10 @@ namespace OpenUtau.Plugin.Builtin {
                 if (vowelStartDuration < totalDuration / 2) {
                     phonemes.Add(new Phoneme {
                         phoneme = stretchPhonemeMapped,
-                        position = vowelStartDuration
+                        position = vowelStartDuration,
+                        expressions = new List<PhonemeExpression>() {
+                            new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 4 }
+                        }
                     });
                 }
                 
@@ -204,13 +261,19 @@ namespace OpenUtau.Plugin.Builtin {
                     if (endFound) {
                         phonemes.Add(new Phoneme {
                             phoneme = endPhoneme,
-                            position = endStart
+                            position = endStart,
+                            expressions = new List<PhonemeExpression>() {
+                                new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 3 }
+                            }
                         });
                     } else {
                         var (endPhoneme2, endOto3, endFound3) = GetMappedPhoneme($"{vowel} R", tone, color);
                         phonemes.Add(new Phoneme {
                             phoneme = endPhoneme2,
-                            position = endStart
+                            position = endStart,
+                            expressions = new List<PhonemeExpression>() {
+                                new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 3 }
+                            }
                         });
                     }
                 } else {
@@ -224,7 +287,10 @@ namespace OpenUtau.Plugin.Builtin {
                         var (phoneme, oto, found) = GetMappedPhoneme($"{vowel} {nextFirstPhoneme}", tone, color);
                         phonemes.Add(new Phoneme {
                             phoneme = phoneme,
-                            position = stretchEnd
+                            position = stretchEnd,
+                            expressions = new List<PhonemeExpression>() {
+                                new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 3 }
+                            }
                         });
                     }
                 }
@@ -239,7 +305,10 @@ namespace OpenUtau.Plugin.Builtin {
                     var (startPhoneme, startOto, startFound) = GetMappedPhoneme($"- {firstPhoneme}", tone, color);
                     phonemes.Add(new Phoneme {
                         phoneme = startPhoneme,
-                        position = -firstPhonemeDuration
+                        position = -firstPhonemeDuration,
+                        expressions = new List<PhonemeExpression>() {
+                            new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 1 }
+                        }
                     });
                 }
 
@@ -248,8 +317,8 @@ namespace OpenUtau.Plugin.Builtin {
                     phoneme = startPhoneme2,
                     position = 0,
                     expressions = new List<PhonemeExpression>() {
-                    new PhonemeExpression() { abbr = "CV", value = 1 }
-                }
+                        new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 2 }
+                    }
                 });
                 
                 int stretchStart = GetVowelDuration(startPhoneme2, tone, attr1.consonantStretchRatio);
@@ -257,7 +326,10 @@ namespace OpenUtau.Plugin.Builtin {
                 if (stretchStart < totalDuration / 2) {
                     phonemes.Add(new Phoneme {
                         phoneme = stretchPhonemeMapped,
-                        position = stretchStart
+                        position = stretchStart,
+                        expressions = new List<PhonemeExpression>() {
+                            new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 4 }
+                        }
                     });
                 }
 
@@ -271,13 +343,19 @@ namespace OpenUtau.Plugin.Builtin {
                             if (endFound2) {
                                 phonemes.Add(new Phoneme {
                                     phoneme = endPhoneme,
-                                    position = endStart
+                                    position = endStart,
+                                    expressions = new List<PhonemeExpression>() {
+                                        new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 3 }
+                                    }
                                 });
                             } else {
                                 var (endPhoneme2, endOto3, endFound3) = GetMappedPhoneme($"{lastPhoneme} R", tone, color);
                                 phonemes.Add(new Phoneme {
                                     phoneme = endPhoneme2,
-                                    position = endStart
+                                    position = endStart,
+                                    expressions = new List<PhonemeExpression>() {
+                                        new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 3 }
+                                    }
                                 });
                             }
                         } else {
@@ -288,7 +366,10 @@ namespace OpenUtau.Plugin.Builtin {
                             var (phoneme, oto, found) = GetMappedPhoneme($"{lastPhoneme} {nextFirstPhoneme}", tone, color);
                             phonemes.Add(new Phoneme {
                                 phoneme = phoneme,
-                                position = stretchEnd
+                                position = stretchEnd,
+                                expressions = new List<PhonemeExpression>() {
+                                    new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 3 }
+                                }
                             });
                         }
                     }
