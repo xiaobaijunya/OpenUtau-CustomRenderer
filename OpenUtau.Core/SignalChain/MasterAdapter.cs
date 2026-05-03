@@ -32,6 +32,10 @@ namespace OpenUtau.Core.SignalChain {
             }
         }
 
+        public bool IsPlayable() {
+            return source != null;
+        }
+
         public void SetPosition(int position) {
             this.position = position;
             Waited = 0;

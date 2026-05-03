@@ -102,6 +102,103 @@ namespace OpenUtau.Core.CustomRender {
         }
 
         /// <summary>
+        /// 为指定音素范围内的曲线采样。
+        /// 返回字典（abbr -> double[]），长度为该音素内的帧数。
+        /// </summary>
+        public static Dictionary<string, double[]> SampleCurvesForPhoneme(
+            RenderPhrase phrase,
+            RenderPhone phone,
+            int phoneIndex,
+            double frameMs,
+            int totalFrames) {
+            var result = new Dictionary<string, double[]>();
+
+            // 计算该音素在全局帧范围内的起始和结束帧索引
+            // phrase 的第 0 帧对应绝对时间 (phrase.positionMs - phrase.leadingMs)
+            double phraseBaseMs = phrase.positionMs - phrase.leadingMs;
+            double phoneStartMs = phone.positionMs - phone.leadingMs;
+            double phoneEndMs = phone.endMs;
+
+            int startFrame = Math.Max(0, (int)((phoneStartMs - phraseBaseMs) / frameMs));
+            int endFrame = Math.Min(totalFrames, (int)Math.Ceiling((phoneEndMs - phraseBaseMs) / frameMs));
+            int phoneFrames = Math.Max(1, endFrame - startFrame);
+
+            // 标准曲线
+            var standardCurves = new (string abbr, Func<bool> hasData, Func<int, double> sample)[] {
+                ("pitd",
+                    () => phrase.pitches != null && phrase.pitches.Length > 0,
+                    i => {
+                        int ticks = GetTicks(phrase, i, frameMs);
+                        int idx = ClampIndex(ticks, phrase.pitches!.Length);
+                        return MusicMath.ToneToFreq(phrase.pitches[idx] * 0.01);
+                    }),
+                ("genc",
+                    () => phrase.gender != null && phrase.gender.Length > 0,
+                    i => {
+                        int ticks = GetTicks(phrase, i, frameMs);
+                        return phrase.gender![ClampIndex(ticks, phrase.gender.Length)];
+                    }),
+                ("brec",
+                    () => phrase.breathiness != null && phrase.breathiness.Length > 0,
+                    i => {
+                        int ticks = GetTicks(phrase, i, frameMs);
+                        return phrase.breathiness![ClampIndex(ticks, phrase.breathiness.Length)];
+                    }),
+                ("tenc",
+                    () => phrase.tension != null && phrase.tension.Length > 0,
+                    i => {
+                        int ticks = GetTicks(phrase, i, frameMs);
+                        return phrase.tension![ClampIndex(ticks, phrase.tension.Length)];
+                    }),
+                ("voic",
+                    () => phrase.voicing != null && phrase.voicing.Length > 0,
+                    i => {
+                        int ticks = GetTicks(phrase, i, frameMs);
+                        return phrase.voicing![ClampIndex(ticks, phrase.voicing.Length)];
+                    }),
+            };
+
+            foreach (var (abbr, hasData, sample) in standardCurves) {
+                if (!hasData()) {
+                    continue;
+                }
+                var curve = new double[phoneFrames];
+                for (int i = 0; i < phoneFrames; i++) {
+                    int globalIdx = startFrame + i;
+                    if (globalIdx < totalFrames) {
+                        curve[i] = sample(globalIdx);
+                    } else {
+                        curve[i] = sample(totalFrames - 1);
+                    }
+                }
+                result[abbr] = curve;
+            }
+
+            // 自定义曲线
+            if (phrase.curves != null) {
+                foreach (var tuple in phrase.curves) {
+                    if (tuple.Item2 == null || tuple.Item2.Length == 0) {
+                        continue;
+                    }
+                    var curve = new double[phoneFrames];
+                    for (int i = 0; i < phoneFrames; i++) {
+                        int globalIdx = startFrame + i;
+                        if (globalIdx < totalFrames) {
+                            int ticks = GetTicks(phrase, globalIdx, frameMs);
+                            curve[i] = tuple.Item2[ClampIndex(ticks, tuple.Item2.Length)];
+                        } else {
+                            int ticks = GetTicks(phrase, totalFrames - 1, frameMs);
+                            curve[i] = tuple.Item2[ClampIndex(ticks, tuple.Item2.Length)];
+                        }
+                    }
+                    result[tuple.Item1] = curve;
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
         /// 判断单条曲线是否全部为默认值。
         /// pitd（音高偏差）永远视为有用，始终返回 false。
         /// 未知曲线回退默认值 0。

@@ -35,9 +35,9 @@ namespace OpenUtau.Plugin.Builtin {
             var attr2 = notes[0].phonemeAttributes?.FirstOrDefault(attr => attr.index == 2) ?? default;
             if (lyric == "-" || lyric.ToLowerInvariant() == "r") {
                 if (singer.TryGetMappedOto($"{prevVowel} R", notes[0].tone + attr0.toneShift, attr0.voiceColor, out var oto1)) {
-                    return MakeSimpleResult(oto1.Alias);
+                    return MakeSimpleResult(oto1.Alias, 0);
                 }
-                return MakeSimpleResult($"{prevVowel} R");
+                return MakeSimpleResult($"{prevVowel} R", 0);
             }
             string currVowel = vowels.TryGetValue(lyric, out currVowel) ? currVowel : lyric;
             int totalDuration = notes.Sum(n => n.duration); // totalDuration of current note
@@ -47,17 +47,12 @@ namespace OpenUtau.Plugin.Builtin {
                     // automatically add ending if present
                     return new Result {
                         phonemes = new Phoneme[] {
-                                new Phoneme() {
-                                    phoneme = oto.Alias,
-                                },
-                                new Phoneme() {
-                                    phoneme = oto1.Alias,
-                                    position = totalDuration - Math.Min(totalDuration / 6, 60),
-                                },
+                                MakePhoneme(oto.Alias, 0, 0),
+                                MakePhoneme(oto1.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 0),
                             },
                     };
                 }
-                return MakeSimpleResult(oto.Alias);
+                return MakeSimpleResult(oto.Alias, 0);
             }
             int vcLen = 120;
             int endTick = notes[^1].position + notes[^1].duration;
@@ -98,13 +93,8 @@ namespace OpenUtau.Plugin.Builtin {
                         // automatically add ending if present
                         return new Result {
                             phonemes = new Phoneme[] {
-                                new Phoneme() {
-                                    phoneme = oto0.Alias,
-                                },
-                                new Phoneme() {
-                                    phoneme = otoEnd.Alias,
-                                    position = totalDuration - Math.Min(totalDuration / 6, 60),
-                                },
+                                MakePhoneme(oto0.Alias, 0, 2),
+                                MakePhoneme(otoEnd.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 0),
                             },
                         };
                     }
@@ -116,18 +106,10 @@ namespace OpenUtau.Plugin.Builtin {
                         if (singer.TryGetMappedOto($"{currVowel} R", notes[0].tone + attr2.toneShift, attr2.voiceColor, out var otoEnd)) {
                             return new Result {
                                 phonemes = new Phoneme[] {
-                                    new Phoneme() {
-                                        phoneme = vcPhoneme,
-                                        position = -vcLen,
+                                    MakePhoneme(vcPhoneme, -vcLen, 2),
+                                    MakePhoneme(cvOto?.Alias ?? lyric, 0, 0),
+                                    MakePhoneme(otoEnd.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 0),
                                 },
-                                    new Phoneme() {
-                                        phoneme = cvOto?.Alias ?? lyric,
-                                },
-                                    new Phoneme() {
-                                        phoneme = otoEnd.Alias,
-                                        position = totalDuration - Math.Min(totalDuration / 6, 60),
-                                },
-                            },
                             };
                         }
                     } else if (prevNeighbour != null && singer.TryGetMappedOto(vcPhoneme, prevNeighbour.Value.tone + attr0.toneShift, attr0.voiceColor, out var vcOto2)) {
@@ -136,31 +118,18 @@ namespace OpenUtau.Plugin.Builtin {
                         if (singer.TryGetMappedOto($"{currVowel} R", notes[0].tone + attr2.toneShift, attr2.voiceColor, out var otoEnd)) {
                             return new Result {
                                 phonemes = new Phoneme[] {
-                                    new Phoneme() {
-                                        phoneme = vcPhoneme,
-                                        position = -vcLen,
+                                    MakePhoneme(vcPhoneme, -vcLen, 2),
+                                    MakePhoneme(cvOto?.Alias ?? lyric, 0, 0),
+                                    MakePhoneme(otoEnd.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 0),
                                 },
-                                    new Phoneme() {
-                                        phoneme = cvOto?.Alias ?? lyric,
-                                },
-                                    new Phoneme() {
-                                        phoneme = otoEnd.Alias,
-                                        position = totalDuration - Math.Min(totalDuration / 6, 60),
-                                },
-                            },
                             };
                         }
                     } // just base note and ending
                     if (singer.TryGetMappedOto($"{currVowel} R", notes[0].tone + attr1.toneShift, attr1.voiceColor, out var otoEnd1)) {
                         return new Result {
                             phonemes = new Phoneme[] {
-                                new Phoneme() {
-                                    phoneme = cvOtoSimple?.Alias ?? lyric,
-                                },
-                                new Phoneme() {
-                                    phoneme = otoEnd1.Alias,
-                                    position = totalDuration - Math.Min(totalDuration / 6, 60),
-                                },
+                                MakePhoneme(cvOtoSimple?.Alias ?? lyric, 0, 0),
+                                MakePhoneme(otoEnd1.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 0),
                             },
                         };
                     }
@@ -170,17 +139,30 @@ namespace OpenUtau.Plugin.Builtin {
             if (singer.TryGetMappedOto(vcPhoneme, notes[0].tone + attr0.toneShift, attr0.voiceColor, out oto)) {
                 return new Result {
                     phonemes = new Phoneme[] {
-                        new Phoneme() {
-                            phoneme = vcPhoneme,
-                            position = -vcLen,
-                        },
-                        new Phoneme() {
-                            phoneme = cvOto?.Alias ?? lyric,
-                        },
+                        MakePhoneme(vcPhoneme, -vcLen, 2),
+                        MakePhoneme(cvOto?.Alias ?? lyric, 0, 0),
                     },
                 };
             }
-            return MakeSimpleResult(cvOtoSimple?.Alias ?? lyric);
+            return MakeSimpleResult(cvOtoSimple?.Alias ?? lyric, 0);
+        }
+
+        private Phoneme MakePhoneme(string phoneme, int position, int phtpValue) {
+            return new Phoneme {
+                phoneme = phoneme,
+                position = position,
+                expressions = new List<PhonemeExpression>() {
+                    new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = phtpValue }
+                }
+            };
+        }
+
+        private Result MakeSimpleResult(string phoneme, int phtpValue) {
+            return new Result() {
+                phonemes = new Phoneme[] {
+                    MakePhoneme(phoneme, 0, phtpValue)
+                }
+            };
         }
 
         public override void SetSinger(USinger singer) {

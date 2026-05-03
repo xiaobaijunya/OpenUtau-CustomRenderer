@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -23,6 +24,13 @@ namespace OpenUtau.Core.CustomRender {
         private static readonly HttpClient sharedHttpClient = new HttpClient {
             Timeout = TimeSpan.FromMinutes(5)
         };
+
+        // 基于 hash 的进程内锁，防止相同内容的并发重复提交
+        // key: phrase.hash, value: SemaphoreSlim(1,1) 作为互斥锁
+        // 注意：SemaphoreSlim 非常轻量（~200 bytes），一个工程中唯一的 phrase hash 数量有限，
+        // 无需主动清理，进程结束后自动回收
+        private static readonly ConcurrentDictionary<ulong, SemaphoreSlim> _hashLocks =
+            new ConcurrentDictionary<ulong, SemaphoreSlim>();
 
         public CustomServerRenderer() {
         }
@@ -84,6 +92,7 @@ namespace OpenUtau.Core.CustomRender {
 
                 var result = Layout(phrase);
 
+                // ===== 第一层检查：快速路径（无锁） =====
                 if (File.Exists(wavPath)) {
                     using (var waveStream = new WaveFileReader(wavPath)) {
                         result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
@@ -97,22 +106,44 @@ namespace OpenUtau.Core.CustomRender {
                     return result;
                 }
 
-                var jsonData = preGeneratedJson ?? ConvertPhraseToJson(phrase);
+                // ===== 基于 hash 的互斥锁，防止并发重复提交相同内容 =====
+                var hashLock = GetOrCreateHashLock(phrase.hash);
+                await hashLock.WaitAsync(cancellation.Token).ConfigureAwait(false);
+                try {
+                    // ===== 第二层检查：获取锁后再次检查缓存（double-check） =====
+                    // 可能在等待锁期间，另一个线程已完成渲染并写入了缓存文件
+                    if (File.Exists(wavPath)) {
+                        using (var waveStream = new WaveFileReader(wavPath)) {
+                            result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
+                        }
 
-                var wavData = await SendToServerAsync(jsonData, cancellation).ConfigureAwait(false);
-                if (wavData != null && wavData.Length > 0) {
-                    File.WriteAllBytes(wavPath, wavData);
+                        if (result.samples != null) {
+                            Renderers.ApplyDynamics(phrase, result);
+                        }
 
-                    using (var waveStream = new WaveFileReader(wavPath)) {
-                        result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
+                        progress.Complete(phrase.phones.Length, progressInfo);
+                        return result;
                     }
 
-                    if (result.samples != null) {
-                        Renderers.ApplyDynamics(phrase, result);
+                    var jsonData = preGeneratedJson ?? ConvertPhraseToJson(phrase);
+
+                    var wavData = await SendToServerAsync(jsonData, cancellation).ConfigureAwait(false);
+                    if (wavData != null && wavData.Length > 0) {
+                        File.WriteAllBytes(wavPath, wavData);
+
+                        using (var waveStream = new WaveFileReader(wavPath)) {
+                            result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
+                        }
+
+                        if (result.samples != null) {
+                            Renderers.ApplyDynamics(phrase, result);
+                        }
+                    } else {
+                        Log.Warning("Server returned empty response, using fallback rendering");
+                        result = FallbackRender(phrase);
                     }
-                } else {
-                    Log.Warning("Server returned empty response, using fallback rendering");
-                    result = FallbackRender(phrase);
+                } finally {
+                    hashLock.Release();
                 }
 
                 progress.Complete(phrase.phones.Length, progressInfo);
@@ -172,36 +203,41 @@ namespace OpenUtau.Core.CustomRender {
             // 计算目标帧数，考虑leadingMs前导时间
             int totalFrames = (int)Math.Ceiling((phrase.durationMs + phrase.leadingMs) / frameMs);
 
-            // === 构建音素列表 ===
-            var phonemeList = BuildPhonemeList(phrase);
-
-            // === 自动采样所有曲线参数 ===
+            // === 全局曲线（供兼容性使用） ===
             var curves = CustomF0Utils.SampleAllCurves(phrase, frameMs, totalFrames);
 
-            // === 动态参数：每个参数始终保留，如果全为默认值则传 null ===
+            // === 动态参数：无论是否默认值，始终写入实际数值 ===
             var dynamicParam = new Dictionary<string, object?>();
 
-            // 已知的标准曲线，始终保留
+            // 已知的标准曲线
             var knownCurves = new[] { "pitd", "genc", "brec", "tenc", "voic" };
             foreach (var abbr in knownCurves) {
-                if (curves.TryGetValue(abbr, out var data) && !CustomF0Utils.IsCurveDefault(abbr, data)) {
+                if (curves.TryGetValue(abbr, out var data)) {
                     dynamicParam[abbr] = data;
-                } else {
-                    dynamicParam[abbr] = null;
                 }
             }
 
-            // 自定义曲线（来自 phrase.curves）：同样处理
+            // 自定义曲线
             foreach (var kvp in curves) {
                 if (Array.IndexOf(knownCurves, kvp.Key) >= 0) {
-                    continue; // 已在上面处理
+                    continue;
                 }
-                dynamicParam[kvp.Key] = CustomF0Utils.IsCurveDefault(kvp.Key, kvp.Value)
-                    ? null
-                    : kvp.Value;
+                dynamicParam[kvp.Key] = kvp.Value;
             }
 
             object dynamicParameter = dynamicParam;
+
+            // === 构建逐音素曲线列表（嵌入每个音素） ===
+            var perPhonemeCurves = new Dictionary<string, Dictionary<string, double[]>>();
+            for (int i = 0; i < phrase.phones.Length; i++) {
+                var phone = phrase.phones[i];
+                var curvesForPhone = CustomF0Utils.SampleCurvesForPhoneme(
+                    phrase, phone, i, frameMs, totalFrames);
+                perPhonemeCurves[(i + 1).ToString()] = curvesForPhone;
+            }
+
+            // === 构建音素列表（每个音素自带曲线） ===
+            var phonemeList = BuildPhonemeList(phrase, perPhonemeCurves);
 
             var jsonData = new {
                 hop_size = hopSize,
@@ -210,7 +246,7 @@ namespace OpenUtau.Core.CustomRender {
                 out_wav = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav"),
                 wav_dur = phrase.durationMs,
                 phoneme_list = phonemeList,
-                Dynamic_parameter = dynamicParameter
+                Dynamic_parameter = dynamicParameter,
             };
 
             var json = JsonConvert.SerializeObject(jsonData, Formatting.None);
@@ -218,14 +254,17 @@ namespace OpenUtau.Core.CustomRender {
         }
 
         /// <summary>
-        /// 构建音素列表，每个音素包含所有 flags 和标准属性。
+        /// 构建音素列表，每个音素包含所有 flags、标准属性和逐音素动态参数曲线。
         /// </summary>
-        private static Dictionary<string, object> BuildPhonemeList(RenderPhrase phrase) {
+        private static Dictionary<string, object> BuildPhonemeList(
+            RenderPhrase phrase,
+            Dictionary<string, Dictionary<string, double[]>> perPhonemeCurves) {
             var phonemeList = new Dictionary<string, object>();
 
             for (int i = 0; i < phrase.phones.Length; i++) {
                 var phone = phrase.phones[i];
                 var envelope = phone.envelope;
+                var key = (i + 1).ToString();
 
                 // 自动收集所有 flags：标准属性 + phoneme.flags（来自项目表达式）
                 var noteFlags = new Dictionary<string, object> {
@@ -262,6 +301,12 @@ namespace OpenUtau.Core.CustomRender {
                     p4Y = envelope[4].Y;
                 }
 
+                // 逐音素动态参数曲线
+                Dictionary<string, double[]>? phonemeDynamicParams = null;
+                if (perPhonemeCurves.TryGetValue(key, out var curves) && curves != null && curves.Count > 0) {
+                    phonemeDynamicParams = curves;
+                }
+
                 var phonemeData = new {
                     phoneme_name = phone.phoneme,
                     note_pitch = MusicMath.GetToneName(phone.tone),
@@ -281,9 +326,10 @@ namespace OpenUtau.Core.CustomRender {
                         p2 = new { x = envelope[2].X, y = envelope[2].Y },
                         p3 = new { x = p3X, y = p3Y },
                         p4 = new { x = p4X, y = p4Y }
-                    }
+                    },
+                    Dynamic_parameter = phonemeDynamicParams
                 };
-                phonemeList[(i + 1).ToString()] = phonemeData;
+                phonemeList[key] = phonemeData;
             }
 
             return phonemeList;
@@ -316,6 +362,19 @@ namespace OpenUtau.Core.CustomRender {
             double totalDurationMs = phrase.durationMs + phrase.leadingMs;
             result.samples = new float[(int)(totalDurationMs * 44.1)];
             return result;
+        }
+
+        /// <summary>
+        /// 获取或创建基于 phrase.hash 的互斥锁，防止相同内容的并发重复提交。
+        /// </summary>
+        private static SemaphoreSlim GetOrCreateHashLock(ulong hash) {
+            var newLock = new SemaphoreSlim(1, 1);
+            var hashLock = _hashLocks.GetOrAdd(hash, newLock);
+            // 如果 GetOrAdd 返回了已存在的值，释放我们创建的 newLock
+            if (hashLock != newLock) {
+                newLock.Dispose();
+            }
+            return hashLock;
         }
 
         public RenderPitchResult LoadRenderedPitch(RenderPhrase phrase) {
