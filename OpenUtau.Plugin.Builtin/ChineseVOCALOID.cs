@@ -236,7 +236,7 @@ namespace OpenUtau.Plugin.Builtin {
                 } else {
                     string prevLastPhoneme = GetLastPhoneme(prevNeighbour!.Value.lyric);
                     var (phoneme, _, _) = GetMappedPhoneme($"{prevLastPhoneme} {vowel}", tone, color);
-                    phonemes.Add(CreatePhoneme(phoneme, 0, 2));
+                    phonemes.Add(CreatePhoneme(phoneme, 0, 0));
                 }
 
                 // Stretch vowel (_V) - only add if a valid oto mapping exists
@@ -245,6 +245,7 @@ namespace OpenUtau.Plugin.Builtin {
                 int vowelStartDuration = GetVowelDuration(prevPhoneme, tone, stretchRatio);
                 var (stretchPhoneme, _, stretchFound) = GetMappedPhoneme(stretchVowel, tone, color);
                 if (stretchFound && vowelStartDuration < totalDuration / 2) {
+                    // VV的生成
                     phonemes.Add(CreatePhoneme(stretchPhoneme, vowelStartDuration, 2));
                 }
 

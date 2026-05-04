@@ -45,7 +45,7 @@ namespace OpenUtau.Core.CustomRender {
             int startTick = 0, 
             int endTick = -1, 
             int trackNo = -1,
-            int maxConcurrency = 4,
+            int maxConcurrency = 2,
             string serverUrl = "http://localhost:8000/synthesize") {
             this.project = project;
             this.startTick = startTick;
@@ -215,7 +215,18 @@ namespace OpenUtau.Core.CustomRender {
                     .Zip(req.sources, (phrase, source) => Tuple.Create(phrase, source, req)))
                 .ToArray();
             if (playing) {
-                Array.Sort(tuples, (a, b) => a.Item1.position.CompareTo(b.Item1.position));
+                // 按距离播放起点的距离排序：
+                // 1) 播放位置及之后的片段优先（用户最先听到的）
+                // 2) 播放位置之前的重叠片段排后面
+                // 两组内各自按 position 升序
+                Array.Sort(tuples, (a, b) => {
+                    bool aAfterStart = a.Item1.position >= startTick;
+                    bool bAfterStart = b.Item1.position >= startTick;
+                    if (aAfterStart != bAfterStart) {
+                        return aAfterStart ? -1 : 1;
+                    }
+                    return a.Item1.position.CompareTo(b.Item1.position);
+                });
             }
             var progress = new Progress(tuples.Sum(t => t.Item1.phones.Length));
 
@@ -224,66 +235,76 @@ namespace OpenUtau.Core.CustomRender {
             var request = tuples.First().Item3;
 
             var customRenderer = new CustomServerRenderer(serverUrl);
-            var httpSemaphore = new SemaphoreSlim(maxConcurrency);
-            var tasks = new Task<(int index, RenderResult result)>[phrases.Length];
-
-            for (int i = 0; i < phrases.Length; i++) {
-                int idx = i;
-                var phrase = phrases[idx];
-
-                tasks[idx] = Task.Run(async () => {
-                    // ===== Phase 1: 检查缓存 + 生成 JSON (CPU密集, 无限制) =====
-                    // 所有 phrase 的 JSON 生成同时跑满 CPU，不受 semaphore 限制
-                    string? preJson = null;
-                    bool needHttp = false;
-
-                    if (phrase.renderer is CustomServerRenderer) {
-                        var wavPath = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav");
-                        if (!File.Exists(wavPath)) {
-                            preJson = CustomServerRenderer.ConvertPhraseToJson(phrase);
-                            needHttp = true;
-                        }
-                    }
-
-                    // ===== Phase 2: HTTP 请求 (I/O密集, semaphore限制并发) =====
-                    if (needHttp) {
-                        await httpSemaphore.WaitAsync(cancellation.Token).ConfigureAwait(false);
-                    }
-                    try {
-                        RenderResult result;
-                        if (phrase.renderer is CustomServerRenderer) {
-                            result = await customRenderer.RenderImpl(phrase, progress, request.trackNo, cancellation, false, preJson).ConfigureAwait(false);
-                        } else {
-                            result = await phrase.renderer.Render(phrase, progress, request.trackNo, cancellation, false).ConfigureAwait(false);
-                        }
-                        return (idx, result);
-                    } finally {
-                        if (needHttp) {
-                            httpSemaphore.Release();
-                        }
-                    }
-                }, cancellation.Token);
-            }
 
             if (playing) {
-                // 播放模式：按位置顺序渐进式更新
-                var remaining = new List<Task<(int index, RenderResult result)>>(tasks);
-                while (remaining.Count > 0 && !cancellation.IsCancellationRequested) {
-                    var completedTask = await Task.WhenAny(remaining).ConfigureAwait(false);
-                    remaining.Remove(completedTask);
-                    var (index, result) = await completedTask.ConfigureAwait(false);
+                // ===== 播放模式：按位置顺序排队渲染 =====
+                // 始终保持最多 maxConcurrency 个 HTTP 请求在执行，
+                // 且总是最靠前的未完成片段优先启动，避免后面先渲染完而前面卡顿。
+                var inProgress = new List<Task<(int index, RenderResult result)>>();
+                int nextToStart = 0;
+
+                while ((inProgress.Count > 0 || nextToStart < phrases.Length)
+                       && !cancellation.IsCancellationRequested) {
+                    // 补充任务槽位：按顺序启动，保持最多 maxConcurrency 个并发
+                    while (inProgress.Count < maxConcurrency && nextToStart < phrases.Length) {
+                        int idx = nextToStart++;
+                        var phrase = phrases[idx];
+                        inProgress.Add(RenderOnePhrase(
+                            idx, phrase, progress, request, customRenderer, cancellation));
+                    }
+
+                    // 等待任意一个完成（由于按顺序启动，通常靠前的先完成）
+                    var completed = await Task.WhenAny(inProgress).ConfigureAwait(false);
+                    inProgress.Remove(completed);
+                    var (index, result) = await completed.ConfigureAwait(false);
                     sources[index].SetSamples(result.samples);
                 }
-                if (request.sources.All(s => s.HasSamples)) {
+
+                if (!cancellation.IsCancellationRequested
+                    && request.sources.All(s => s.HasSamples)) {
                     request.part.SetMix(request.mix);
                     DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));
                 }
             } else {
-                // 非播放模式：一次性处理所有结果
+                // ===== 非播放模式：全部并发（导出等场景，顺序不重要） =====
+                var httpSemaphore = new SemaphoreSlim(maxConcurrency);
+                var tasks = new Task<(int index, RenderResult result)>[phrases.Length];
+
+                for (int i = 0; i < phrases.Length; i++) {
+                    int idx = i;
+                    var phrase = phrases[idx];
+
+                    tasks[idx] = Task.Run(async () => {
+                        string? preJson = null;
+                        bool needHttp = false;
+
+                        if (phrase.renderer is CustomServerRenderer) {
+                            var wavPath = CustomServerRenderer.GetCachePath(phrase);
+                            if (!File.Exists(wavPath)) {
+                                preJson = CustomServerRenderer.ConvertPhraseToJson(phrase);
+                                needHttp = true;
+                            }
+                        }
+
+                        if (needHttp) {
+                            await httpSemaphore.WaitAsync(cancellation.Token)
+                                .ConfigureAwait(false);
+                        }
+                        try {
+                            return await RenderOnePhraseCore(
+                                idx, phrase, progress, request, customRenderer,
+                                cancellation, preJson).ConfigureAwait(false);
+                        } finally {
+                            if (needHttp) {
+                                httpSemaphore.Release();
+                            }
+                        }
+                    }, cancellation.Token);
+                }
+
                 var results = await Task.WhenAll(tasks).ConfigureAwait(false);
                 foreach (var (index, result) in results) {
                     sources[index].SetSamples(result.samples);
-                    // 每次设置后检查是否全部完成（兼容多 track 场景）
                 }
                 if (request.sources.All(s => s.HasSamples)) {
                     request.part.SetMix(request.mix);
@@ -291,6 +312,49 @@ namespace OpenUtau.Core.CustomRender {
                 }
             }
             progress.Clear();
+        }
+
+        /// <summary>
+        /// 渲染单个 phrase（播放模式使用）。
+        /// 不做并发控制，由调用方（RenderRequests）负责按顺序调度。
+        /// </summary>
+        private async Task<(int index, RenderResult result)> RenderOnePhrase(
+            int idx, RenderPhrase phrase, Progress progress,
+            RenderPartRequest request, CustomServerRenderer customRenderer,
+            CancellationTokenSource cancellation) {
+
+            string? preJson = null;
+            if (phrase.renderer is CustomServerRenderer) {
+                var wavPath = CustomServerRenderer.GetCachePath(phrase);
+                if (!File.Exists(wavPath)) {
+                    preJson = CustomServerRenderer.ConvertPhraseToJson(phrase);
+                }
+            }
+
+            return await RenderOnePhraseCore(
+                idx, phrase, progress, request, customRenderer,
+                cancellation, preJson).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 渲染单个 phrase 的核心逻辑（播放 / 非播放共用）。
+        /// </summary>
+        private static async Task<(int index, RenderResult result)> RenderOnePhraseCore(
+            int idx, RenderPhrase phrase, Progress progress,
+            RenderPartRequest request, CustomServerRenderer customRenderer,
+            CancellationTokenSource cancellation, string? preJson) {
+
+            RenderResult result;
+            if (phrase.renderer is CustomServerRenderer) {
+                result = await customRenderer.RenderImpl(
+                    phrase, progress, request.trackNo, cancellation, false, preJson)
+                    .ConfigureAwait(false);
+            } else {
+                result = await phrase.renderer.Render(
+                    phrase, progress, request.trackNo, cancellation, false)
+                    .ConfigureAwait(false);
+            }
+            return (idx, result);
         }
     }
 }
