@@ -7,7 +7,6 @@ using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using K4os.Hash.xxHash;
 using NAudio.Wave;
 using Newtonsoft.Json;
 using OpenUtau.Core.DiffSinger;
@@ -91,7 +90,7 @@ namespace OpenUtau.Core.CustomRender {
                     $"Track {trackNo + 1}: CustomServerRenderer \"{string.Join(" ", phrase.phones.Select(p => p.phoneme))}\"";
                 progress.Complete(0, progressInfo);
 
-                var wavPath = GetCachePath(phrase);
+                var wavPath = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav");
                 phrase.AddCacheFile(wavPath);
 
                 var result = Layout(phrase);
@@ -110,9 +109,8 @@ namespace OpenUtau.Core.CustomRender {
                     return result;
                 }
 
-                var cacheHash = GetCacheHash(phrase);
-                // ===== 基于缓存 hash 的互斥锁，防止并发重复提交相同内容 =====
-                var hashLock = GetOrCreateHashLock(cacheHash);
+                // ===== 基于 hash 的互斥锁，防止并发重复提交相同内容 =====
+                var hashLock = GetOrCreateHashLock(phrase.hash);
                 await hashLock.WaitAsync(cancellation.Token).ConfigureAwait(false);
                 try {
                     // ===== 第二层检查：获取锁后再次检查缓存（double-check） =====
@@ -131,17 +129,17 @@ namespace OpenUtau.Core.CustomRender {
                     // 如果已有相同 hash 的 HTTP 任务在执行（例如上一次播放取消后仍在跑），
                     // 直接等待该任务，不重复提交。
                     Task<byte[]?> httpTask;
-                    if (_inFlightHttpTasks.TryGetValue(cacheHash, out var existingTask)) {
+                    if (_inFlightHttpTasks.TryGetValue(phrase.hash, out var existingTask)) {
                         httpTask = existingTask;
-                        Log.Debug($"CustomServerRenderer reusing in-flight HTTP task for hash {cacheHash:x16}");
+                        Log.Debug($"CustomServerRenderer reusing in-flight HTTP task for hash {phrase.hash:x16}");
                     } else {
                         var jsonData = preGeneratedJson ?? ConvertPhraseToJson(phrase);
                         // 使用 CancellationToken.None：即使播放被取消，HTTP 请求也继续完成，
                         // 确保后端结果被缓存，避免下次播放重复提交。
                         httpTask = SendToServerAsync(jsonData, CancellationToken.None);
-                        if (!_inFlightHttpTasks.TryAdd(cacheHash, httpTask)) {
+                        if (!_inFlightHttpTasks.TryAdd(phrase.hash, httpTask)) {
                             // 竞态：另一个线程刚好也添加了，使用已有的
-                            httpTask = _inFlightHttpTasks[cacheHash];
+                            httpTask = _inFlightHttpTasks[phrase.hash];
                         }
                     }
 
@@ -150,7 +148,7 @@ namespace OpenUtau.Core.CustomRender {
                     try {
                         wavData = await httpTask.ConfigureAwait(false);
                     } finally {
-                        _inFlightHttpTasks.TryRemove(cacheHash, out _);
+                        _inFlightHttpTasks.TryRemove(phrase.hash, out _);
                     }
 
                     if (wavData != null && wavData.Length > 0) {
@@ -266,7 +264,7 @@ namespace OpenUtau.Core.CustomRender {
                 hop_size = hopSize,
                 sample_rate = sampleRate,
                 frame_ms = frameMs,
-                out_wav = GetCachePath(phrase),
+                out_wav = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav"),
                 wav_dur = phrase.durationMs,
                 phoneme_list = phonemeList,
                 Dynamic_parameter = dynamicParameter,
@@ -398,52 +396,6 @@ namespace OpenUtau.Core.CustomRender {
                 newLock.Dispose();
             }
             return hashLock;
-        }
-
-        /// <summary>
-        /// 计算缓存用的哈希值 = Hash(true) 排除 dynamics。
-        /// Hash(true) = preEffectHash + pitches/gender/breathiness/toneShift/tension/voicing/curves
-        /// 其中 dynamics 仅前端 ApplyDynamics 使用，不传给后端，所以跳过。
-        /// 其他曲线（pitd/genc/brec/tenc/voic）都作为 Dynamic_parameter 发给后端，必须纳入。
-        /// </summary>
-        internal static ulong GetCacheHash(RenderPhrase phrase) {
-            using (var stream = new MemoryStream()) {
-                using (var writer = new BinaryWriter(stream)) {
-                    writer.Write(phrase.preEffectHash);
-                    // 与 RenderPhrase.Hash(true) 相同，但排除 dynamics
-                    foreach (var array in new float[][] {
-                        phrase.pitches,
-                        // phrase.dynamics  ← 故意跳过，仅前端使用
-                        phrase.gender,
-                        phrase.breathiness,
-                        phrase.toneShift,
-                        phrase.tension,
-                        phrase.voicing,
-                    }) {
-                        if (array == null) {
-                            writer.Write("null");
-                        } else {
-                            foreach (var v in array) {
-                                writer.Write(v);
-                            }
-                        }
-                    }
-                    foreach (var curve in phrase.curves) {
-                        writer.Write(curve.Item1);
-                        if (curve.Item2 != null) {
-                            foreach (var v in curve.Item2) {
-                                writer.Write(v);
-                            }
-                        }
-                    }
-                    return XXH64.DigestOf(stream.ToArray());
-                }
-            }
-        }
-
-        internal static string GetCachePath(RenderPhrase phrase) {
-            return Path.Join(PathManager.Inst.CachePath,
-                $"custom-{GetCacheHash(phrase):x16}.wav");
         }
 
         public RenderPitchResult LoadRenderedPitch(RenderPhrase phrase) {

@@ -279,7 +279,8 @@ namespace OpenUtau.Core.CustomRender {
                         bool needHttp = false;
 
                         if (phrase.renderer is CustomServerRenderer) {
-                            var wavPath = CustomServerRenderer.GetCachePath(phrase);
+                            var wavPath = Path.Join(PathManager.Inst.CachePath,
+                                $"custom-{phrase.hash:x16}.wav");
                             if (!File.Exists(wavPath)) {
                                 preJson = CustomServerRenderer.ConvertPhraseToJson(phrase);
                                 needHttp = true;
@@ -325,7 +326,8 @@ namespace OpenUtau.Core.CustomRender {
 
             string? preJson = null;
             if (phrase.renderer is CustomServerRenderer) {
-                var wavPath = CustomServerRenderer.GetCachePath(phrase);
+                var wavPath = Path.Join(PathManager.Inst.CachePath,
+                    $"custom-{phrase.hash:x16}.wav");
                 if (!File.Exists(wavPath)) {
                     preJson = CustomServerRenderer.ConvertPhraseToJson(phrase);
                 }
