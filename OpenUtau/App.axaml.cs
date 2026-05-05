@@ -95,6 +95,7 @@ namespace OpenUtau.App {
             var light = (IResourceDictionary) Current.Resources["themes-light"]!;
             var dark = (IResourceDictionary) Current.Resources["themes-dark"]!;
             var custom = (IResourceDictionary) Current.Resources["themes-custom"]!;
+            var warmSage = (IResourceDictionary) Current.Resources["themes-warmsage"]!;
             switch (Core.Util.Preferences.Default.ThemeName) { 
                 case "Light":
                     ApplyTheme(light);
@@ -102,6 +103,10 @@ namespace OpenUtau.App {
                     break;
                 case "Dark":
                     ApplyTheme(dark);
+                    Current.RequestedThemeVariant = ThemeVariant.Dark;
+                    break;
+                case "WarmSage":
+                    ApplyTheme(warmSage);
                     Current.RequestedThemeVariant = ThemeVariant.Dark;
                     break;
                 default:

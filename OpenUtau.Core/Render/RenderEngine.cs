@@ -237,10 +237,12 @@ namespace OpenUtau.Core.Render {
                     break;
                 }
                 source.SetSamples(task.Result.samples);
-                if (request.sources.All(s => s.HasSamples)) {
+                // Avoid clearing previously rendered waveform: only replace mix
+                // when first-time render (Mix==null) or enough sources are ready.
+                if (request.part.Mix == null || request.sources.Count(s => s.HasSamples) >= 3) {
                     request.part.SetMix(request.mix);
-                    DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));
                 }
+                DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));
             }
             progress.Clear();
         }

@@ -77,7 +77,7 @@ namespace OpenUtau.App {
 
         public static List<string> GetAvailableThemes() {
             Colors.CustomTheme.ListThemes();
-            return ["Light", "Dark", ..Colors.CustomTheme.Themes.Select(v => v.Key)];
+            return ["Light", "Dark", "WarmSage", ..Colors.CustomTheme.Themes.Select(v => v.Key)];
         }
 
         public static void LoadTheme() {

@@ -74,8 +74,7 @@ namespace OpenUtau.App.Controls {
             if (bitmap != null) {
                 Array.Clear(bitmapData, 0, bitmapData.Length);
                 var viewModel = (NotesViewModel?)DataContext;
-                if (viewModel != null && ShowWaveform &&
-                    viewModel.TickWidth > ViewConstants.PianoRollTickWidthShowDetails) {
+                if (viewModel != null && ShowWaveform) {
                     var project = viewModel.Project;
                     var part = viewModel.Part;
                     if (project != null && part != null && part.Mix != null) {

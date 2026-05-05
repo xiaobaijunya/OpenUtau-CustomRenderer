@@ -100,6 +100,10 @@ namespace OpenUtau.App.Controls {
                     degreeNames = Enumerable.Repeat("", 12).ToArray();
                     break;
             }
+            // Subtle dotted line between adjacent white keys (e.g. E/F, B/C).
+            var whiteKeyBoundaryPen = new Pen(
+                ThemeManager.NeutralAccentBrushSemi, 1,
+                new DashStyle(new double[] { 2, 4 }, 0));
             while (top < Bounds.Height) {
                 bool isAltTrack = IsAltTrack(track) ^ (ThemeManager.IsDarkMode && !IsKeyboard);
                 bool isCenterKey = IsKeyboard && IsCenterKey(track);
@@ -110,6 +114,20 @@ namespace OpenUtau.App.Controls {
                     brush,
                     null,
                     new Rect(0, (int)top, Bounds.Width, TrackHeight));
+                // Draw a subtle dotted line between adjacent white keys (e.g. E/F, B/C).
+                if (!isAltTrack && !isCenterKey) {
+                    int nextTrack = track + 1;
+                    if (nextTrack < ViewConstants.MaxTone) {
+                        bool nextIsAlt = IsAltTrack(nextTrack) ^ (ThemeManager.IsDarkMode && !IsKeyboard);
+                        bool nextIsCenter = IsKeyboard && IsCenterKey(nextTrack);
+                        if (!nextIsAlt && !nextIsCenter) {
+                            double lineY = top + TrackHeight - 0.5;
+                            context.DrawLine(whiteKeyBoundaryPen,
+                                new Point(0, lineY),
+                                new Point(Bounds.Width, lineY));
+                        }
+                    }
+                }
                 if (IsKeyboard && TrackHeight >= 12) {
                     brush = isCenterKey ? ThemeManager.CenterKeyNameBrush
                         : isAltTrack ? ThemeManager.BlackKeyNameBrush

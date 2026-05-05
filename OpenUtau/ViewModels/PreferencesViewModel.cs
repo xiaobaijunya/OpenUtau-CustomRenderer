@@ -258,7 +258,7 @@ namespace OpenUtau.App.ViewModels {
                 });
             this.WhenAnyValue(vm => vm.ThemeName)
                 .Subscribe(themeName => {
-                    ThemeEditable = themeName != "Light" && themeName != "Dark";
+                    ThemeEditable = themeName != "Light" && themeName != "Dark" && themeName != "WarmSage";
                     if (!IsThemeEditorOpen) {
                         Preferences.Default.ThemeName = themeName;
                         Preferences.Save();

@@ -43,16 +43,19 @@ namespace OpenUtau.Plugin.Builtin {
             int totalDuration = notes.Sum(n => n.duration); // totalDuration of current note
 
             if (singer.TryGetMappedOto($"{prevVowel} {lyric}", notes[0].tone + attr0.toneShift, attr0.voiceColor, out var oto)) {
+                // V-V 连接：当前歌词是元音时 phtp=2，V-C 连接保持 phtp=0
+                bool isVV = vowels.ContainsKey(lyric);
+                int phtp = isVV ? 2 : 0;
                 if (nextNeighbour == null && singer.TryGetMappedOto($"{currVowel} R", notes[0].tone + attr1.toneShift, attr1.voiceColor, out var oto1)) {
                     // automatically add ending if present
                     return new Result {
                         phonemes = new Phoneme[] {
-                                MakePhoneme(oto.Alias, 0, 0),
-                                MakePhoneme(oto1.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 0),
+                                MakePhoneme(oto.Alias, 0, phtp),
+                                MakePhoneme(oto1.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 2),
                             },
                     };
                 }
-                return MakeSimpleResult(oto.Alias, 0);
+                return MakeSimpleResult(oto.Alias, phtp);
             }
             int vcLen = 120;
             int endTick = notes[^1].position + notes[^1].duration;
@@ -94,7 +97,7 @@ namespace OpenUtau.Plugin.Builtin {
                         return new Result {
                             phonemes = new Phoneme[] {
                                 MakePhoneme(oto0.Alias, 0, 2),
-                                MakePhoneme(otoEnd.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 0),
+                                MakePhoneme(otoEnd.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 2),
                             },
                         };
                     }
@@ -108,7 +111,7 @@ namespace OpenUtau.Plugin.Builtin {
                                 phonemes = new Phoneme[] {
                                     MakePhoneme(vcPhoneme, -vcLen, 2),
                                     MakePhoneme(cvOto?.Alias ?? lyric, 0, 0),
-                                    MakePhoneme(otoEnd.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 0),
+                                    MakePhoneme(otoEnd.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 2),
                                 },
                             };
                         }
@@ -120,7 +123,7 @@ namespace OpenUtau.Plugin.Builtin {
                                 phonemes = new Phoneme[] {
                                     MakePhoneme(vcPhoneme, -vcLen, 2),
                                     MakePhoneme(cvOto?.Alias ?? lyric, 0, 0),
-                                    MakePhoneme(otoEnd.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 0),
+                                    MakePhoneme(otoEnd.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 2),
                                 },
                             };
                         }
@@ -129,7 +132,7 @@ namespace OpenUtau.Plugin.Builtin {
                         return new Result {
                             phonemes = new Phoneme[] {
                                 MakePhoneme(cvOtoSimple?.Alias ?? lyric, 0, 0),
-                                MakePhoneme(otoEnd1.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 0),
+                                MakePhoneme(otoEnd1.Alias, totalDuration - Math.Min(totalDuration / 6, 60), 2),
                             },
                         };
                     }

@@ -28,7 +28,7 @@ public class CustomTheme {
             }
         }
 
-        Preferences.Default.ThemeName = "Light";
+        Preferences.Default.ThemeName = "WarmSage";
         Default = new ThemeYaml();
     }
 

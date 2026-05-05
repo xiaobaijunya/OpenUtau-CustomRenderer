@@ -181,7 +181,6 @@ namespace OpenUtau.Core.CustomRender {
                     .Select(part => part as UVoicePart)
                     .Select(part => part.GetRenderRequest())
                     .Where(request => request != null)
-                    .Where(request => request.phrases.Any(p => p.renderer is CustomServerRenderer))
                     .ToArray();
             }
             foreach (var request in requests) {
@@ -215,13 +214,13 @@ namespace OpenUtau.Core.CustomRender {
                     .Zip(req.sources, (phrase, source) => Tuple.Create(phrase, source, req)))
                 .ToArray();
             if (playing) {
-                // 按距离播放起点的距离排序：
-                // 1) 播放位置及之后的片段优先（用户最先听到的）
-                // 2) 播放位置之前的重叠片段排后面
+                // 按播放优先排序：
+                // 1) 播放位置及之后结束的片段优先（包含正在播放的片段）
+                // 2) 播放位置之前结束的片段排后面
                 // 两组内各自按 position 升序
                 Array.Sort(tuples, (a, b) => {
-                    bool aAfterStart = a.Item1.position >= startTick;
-                    bool bAfterStart = b.Item1.position >= startTick;
+                    bool aAfterStart = a.Item1.end > startTick;
+                    bool bAfterStart = b.Item1.end > startTick;
                     if (aAfterStart != bAfterStart) {
                         return aAfterStart ? -1 : 1;
                     }
@@ -232,7 +231,6 @@ namespace OpenUtau.Core.CustomRender {
 
             var phrases = tuples.Select(t => t.Item1).ToArray();
             var sources = tuples.Select(t => t.Item2).ToArray();
-            var request = tuples.First().Item3;
 
             var customRenderer = new CustomServerRenderer(serverUrl);
 
@@ -249,8 +247,9 @@ namespace OpenUtau.Core.CustomRender {
                     while (inProgress.Count < maxConcurrency && nextToStart < phrases.Length) {
                         int idx = nextToStart++;
                         var phrase = phrases[idx];
+                        var phraseRequest = tuples[idx].Item3;
                         inProgress.Add(RenderOnePhrase(
-                            idx, phrase, progress, request, customRenderer, cancellation));
+                            idx, phrase, progress, phraseRequest, customRenderer, cancellation));
                     }
 
                     // 等待任意一个完成（由于按顺序启动，通常靠前的先完成）
@@ -258,12 +257,14 @@ namespace OpenUtau.Core.CustomRender {
                     inProgress.Remove(completed);
                     var (index, result) = await completed.ConfigureAwait(false);
                     sources[index].SetSamples(result.samples);
-                }
-
-                if (!cancellation.IsCancellationRequested
-                    && request.sources.All(s => s.HasSamples)) {
-                    request.part.SetMix(request.mix);
-                    DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));
+                    if (!cancellation.IsCancellationRequested) {
+                        var completedRequest = tuples[index].Item3;
+                        // Avoid clearing previously rendered waveform.
+                        if (completedRequest.part.Mix == null || completedRequest.sources.Count(s => s.HasSamples) >= 3) {
+                            completedRequest.part.SetMix(completedRequest.mix);
+                        }
+                        DocManager.Inst.ExecuteCmd(new PartRenderedNotification(completedRequest.part));
+                    }
                 }
             } else {
                 // ===== 非播放模式：全部并发（导出等场景，顺序不重要） =====
@@ -273,6 +274,7 @@ namespace OpenUtau.Core.CustomRender {
                 for (int i = 0; i < phrases.Length; i++) {
                     int idx = i;
                     var phrase = phrases[idx];
+                    var phraseRequest = tuples[idx].Item3;
 
                     tasks[idx] = Task.Run(async () => {
                         string? preJson = null;
@@ -293,7 +295,7 @@ namespace OpenUtau.Core.CustomRender {
                         }
                         try {
                             return await RenderOnePhraseCore(
-                                idx, phrase, progress, request, customRenderer,
+                                idx, phrase, progress, phraseRequest, customRenderer,
                                 cancellation, preJson).ConfigureAwait(false);
                         } finally {
                             if (needHttp) {
@@ -306,10 +308,12 @@ namespace OpenUtau.Core.CustomRender {
                 var results = await Task.WhenAll(tasks).ConfigureAwait(false);
                 foreach (var (index, result) in results) {
                     sources[index].SetSamples(result.samples);
-                }
-                if (request.sources.All(s => s.HasSamples)) {
-                    request.part.SetMix(request.mix);
-                    DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));
+                    var completedRequest = tuples[index].Item3;
+                    // Avoid clearing previously rendered waveform.
+                    if (completedRequest.part.Mix == null || completedRequest.sources.Count(s => s.HasSamples) >= 3) {
+                        completedRequest.part.SetMix(completedRequest.mix);
+                    }
+                    DocManager.Inst.ExecuteCmd(new PartRenderedNotification(completedRequest.part));
                 }
             }
             progress.Clear();
