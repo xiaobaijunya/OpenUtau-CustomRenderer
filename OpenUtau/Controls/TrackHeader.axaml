@@ -116,7 +116,7 @@
               <Setter Property="Height" Value="NaN"/>
             </Style>
           </Grid.Styles>
-          <Slider Grid.Column="1" Name="VolumeSlider" HorizontalAlignment="Stretch" Classes="fader" Minimum="-24" Maximum="12" Value="{Binding Volume}"
+          <Slider Grid.Column="1" Name="VolumeSlider" HorizontalAlignment="Stretch" Classes="fader" Minimum="-24" Maximum="24" Value="{Binding Volume}"
                   PointerPressed="VolumeFaderPointerPressed" ValueChanged="VolumeOrPanSliderValueChanged"
                   ContextRequested="VolumeFaderContextRequested" IsEnabled="{Binding !Muted}"/>
           <TextBlock Grid.Column="3" HorizontalAlignment="Left" Background="Transparent"

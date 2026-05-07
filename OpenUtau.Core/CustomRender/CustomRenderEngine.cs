@@ -45,13 +45,14 @@ namespace OpenUtau.Core.CustomRender {
             int startTick = 0, 
             int endTick = -1, 
             int trackNo = -1,
-            int maxConcurrency = 2,
+            int maxConcurrency = 0,
             string serverUrl = "http://localhost:8000/synthesize") {
             this.project = project;
             this.startTick = startTick;
             this.endTick = endTick;
             this.trackNo = trackNo;
-            this.maxConcurrency = maxConcurrency;
+            this.maxConcurrency = maxConcurrency > 0 ? maxConcurrency
+                : (Preferences.Default?.NumRenderThreads).GetValueOrDefault(2);
             this.serverUrl = serverUrl;
         }
 
@@ -139,7 +140,7 @@ namespace OpenUtau.Core.CustomRender {
                 if (trackRequests.Length == 0) {
                     trackMixes.Add(null);
                 } else {
-                    RenderRequests(trackRequests, newCancellation);
+                    RenderRequests(trackRequests, newCancellation).GetAwaiter().GetResult();
                     var mix = new WaveMix(trackRequests.Select(req => req.mix).ToArray());
                     trackMixes.Add(mix);
                 }
@@ -260,7 +261,7 @@ namespace OpenUtau.Core.CustomRender {
                     if (!cancellation.IsCancellationRequested) {
                         var completedRequest = tuples[index].Item3;
                         // Avoid clearing previously rendered waveform.
-                        if (completedRequest.part.Mix == null || completedRequest.sources.Count(s => s.HasSamples) >= 3) {
+                        if (completedRequest.part.Mix == null || completedRequest.sources.Count(s => s.HasSamples) >= 3 || completedRequest.sources.All(s => s.HasSamples)) {
                             completedRequest.part.SetMix(completedRequest.mix);
                         }
                         DocManager.Inst.ExecuteCmd(new PartRenderedNotification(completedRequest.part));
@@ -310,7 +311,7 @@ namespace OpenUtau.Core.CustomRender {
                     sources[index].SetSamples(result.samples);
                     var completedRequest = tuples[index].Item3;
                     // Avoid clearing previously rendered waveform.
-                    if (completedRequest.part.Mix == null || completedRequest.sources.Count(s => s.HasSamples) >= 3) {
+                    if (completedRequest.part.Mix == null || completedRequest.sources.Count(s => s.HasSamples) >= 3 || completedRequest.sources.All(s => s.HasSamples)) {
                         completedRequest.part.SetMix(completedRequest.mix);
                     }
                     DocManager.Inst.ExecuteCmd(new PartRenderedNotification(completedRequest.part));

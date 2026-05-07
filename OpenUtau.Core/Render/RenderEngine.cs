@@ -239,7 +239,7 @@ namespace OpenUtau.Core.Render {
                 source.SetSamples(task.Result.samples);
                 // Avoid clearing previously rendered waveform: only replace mix
                 // when first-time render (Mix==null) or enough sources are ready.
-                if (request.part.Mix == null || request.sources.Count(s => s.HasSamples) >= 3) {
+                if (request.part.Mix == null || request.sources.Count(s => s.HasSamples) >= 3 || request.sources.All(s => s.HasSamples)) {
                     request.part.SetMix(request.mix);
                 }
                 DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));

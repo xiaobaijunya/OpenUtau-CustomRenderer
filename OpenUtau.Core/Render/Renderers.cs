@@ -50,11 +50,21 @@ namespace OpenUtau.Core.Render {
         }
 
         public static string GetDefaultRenderer(USingerType singerType) {
-            if (Preferences.Default.DefaultRenderer == "Classic" && singerType == USingerType.Classic) {
-                return CLASSIC;
-            } else {
-                return GetSupportedRenderers(singerType)[0];
+            if (singerType == USingerType.Classic) {
+                var defaultRenderer = Preferences.Default.DefaultRenderer;
+                if (string.IsNullOrEmpty(defaultRenderer)) {
+                    return WORLDLINE_R;
+                }
+                switch (defaultRenderer) {
+                    case "Classic":
+                        return CLASSIC;
+                    case "Custom Server":
+                        return CUSTOM_SERVER;
+                    default: // "WORLDLINE-R" or any other value
+                        return WORLDLINE_R;
+                }
             }
+            return GetSupportedRenderers(singerType)[0];
         }
 
         public static IRenderer CreateRenderer(string renderer) {

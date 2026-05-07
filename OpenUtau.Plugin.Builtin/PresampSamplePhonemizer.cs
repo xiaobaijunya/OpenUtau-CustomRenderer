@@ -9,7 +9,7 @@ using OpenUtau.Core.Ustx;
 
 #if DEBUG
 namespace OpenUtau.Plugin.Builtin {
-    [Phonemizer("Presamp Sample Phonemizer", "ZH CVVC", language: "ZH")]
+    [Phonemizer("Presamp Sample Phonemizer", "ZH PRESAMP", language: "ZH")]
     public class PresampSamplePhonemizer : Phonemizer {
         // Supporting: [VOWEL][CONSONANT][PRIORITY][REPLACE][ALIAS(VCPAD,VCVPAD)]
 
@@ -96,30 +96,30 @@ namespace OpenUtau.Plugin.Builtin {
 
         // Citation: https://delta-kimigatame.hatenablog.jp/entry/ar591802 CVVChinese用
         private readonly static List<string> defVowels = new List<string> {
-            { "ang=ang=ang,bang,pang,mang,fang,dang,tang,nang,lang,gang,kang,hang,zhang,chang,shang,rang,zang,cang,sang,yang,liang,jiang,qiang,xiang,wang,guang,kuang,huang,zhuang,chuang,shuang,niang=100" },
-            { "ei=ei=ei,bei,pei,mei,fei,dei,tei,nei,lei,gei,kei,hei,zhei,shei,zei,wei,dui,tui,gui,kui,hui,zhui,chui,shui,rui,zui,cui,sui=100" },
-            { "ai=ai=ai,bai,pai,mai,dai,tai,nai,lai,gai,kai,hai,zhai,chai,shai,zai,cai,sai,wai,guai,kuai,huai,zhuai,chuai,shuai=100" },
-            { "ir=ir=zhi,chi,shi,ri=100" },
-            { "ong=ong=ong,dong,tong,nong,long,gong,kong,hong,zhong,chong,rong,zong,cong,song,yong,jiong,qiong,xiong=100" },
-            { "ao=ao=ao,bao,pao,mao,dao,tao,nao,lao,gao,kao,hao,zhao,chao,shao,rao,zao,cao,sao,yao,biao,piao,miao,diao,tiao,niao,liao,jiao,qiao,xiao=100" },
-            { "an=an=an,ban,pan,man,fan,dan,tan,nan,lan,gan,kan,han,zhan,chan,shan,ran,zan,can,san,wan,duan,tuan,nuan,luan,guan,kuan,huan,zhuan,chuan,shuan,ruan,zuan,cuan,suan=100" },
-            { "en=en=en,ben,pen,men,fen,nen,gen,ken,hen,zhen,chen,shen,ren,zen,cen,sen,wen,dun,tun,lun,gun,kun,hun,zhun,chun,shun,run,zun,cun,sun=100" },
-            { "in=in=yin,bin,pin,min,nin,lin,jin,qin,xin=100" },
-            { "ing=ing=ying,bing,ping,ming,ding,ting,ning,ling,jing,qing,xing=100" },
-            { "er=er=er=100" },
-            { "eng=eng=eng,beng,peng,meng,feng,deng,teng,neng,leng,geng,keng,heng,weng,zheng,cheng,sheng,reng,zeng,ceng,seng=100" },
-            { "i0=i0=zi,ci,si=100" },
-            { "vn=vn=yun,jun,qun,xun=100" },
-            { "e0=e0=ye,bie,pie,mie,die,tie,nie,lie,jie,qie,xie=100" },
-            { "a=a=a,ba,pa,ma,fa,da,ta,na,la,ga,ka,ha,zha,cha,sha,za,ca,sa,ya,lia,jia,qia,xia,wa,gua,kua,hua,zhua,shua,dia=100" },
-            { "e=e=e,me,de,te,ne,le,ge,ke,he,zhe,che,she,re,ze,ce,se=100" },
-            { "i=i=i,bi,pi,mi,di,ti,ni,li,ji,qi,xi,yi=100" },
-            { "o=o=o,bo,po,mo,fo,wo,duo,tuo,nuo,luo,guo,kuo,huo,zhuo,chuo,shuo,ruo,zuo,cuo,suo=100" },
-            { "en0=en0=yan,bian,pian,mian,dian,tian,nian,lian,jian,qian,xian,yuan,juan,quan,xuan=100" },
-            { "u=u=u,bu,pu,mu,fu,du,tu,nu,lu,gu,ku,hu,zhu,chu,shu,ru,zu,cu,su,wu=100" },
-            { "v=v=yu,nv,lv,ju,qu,xu=100" },
-            { "ue=ue=yue,nue,lue,jue,que,xue=100" },
-            { "ou=ou=ou,pou,mou,fou,dou,tou,lou,gou,kou,hou,zhou,chou,shou,rou,zou,cou,sou,you,miu,diu,niu,liu,jiu,qiu,xiu=100" }
+            {"a=a=za,ca,sha,ta,lia,ka,cha,ga,kua,fa,hua,da,wa,pa,shua,zha,ma,ha,qia,jia,gua,zhua,xia,ba,dia,na,la,sa,ya,a=100"},
+            {"ang=ang=nang,guang,cang,zhang,yang,niang,ang,dang,liang,shang,zhuang,kang,hang,tang,pang,chuang,huang,zang,wang,bang,jiang,gang,sang,kuang,rang,fang,chang,xiang,shuang,mang,qiang,lang=100"},
+            {"ao=ao=gao,pao,yao,hao,diao,zao,qiao,shao,mao,cao,piao,xiao,zhao,tiao,lao,biao,sao,kao,nao,liao,dao,chao,jiao,miao,ao,tao,rao,niao,bao=100"},
+            {"ai=ai=mai,lai,dai,pai,gai,chai,kuai,cai,bai,huai,shai,ai,chuai,tai,guai,zhuai,wai,hai,nai,shuai,zai,kai,zhai,sai=100"},
+            {"an=an=duan,zan,shan,wan,ran,huan,guan,an,ruan,ban,chan,kuan,kan,tan,zhuan,han,can,nan,lan,dan,fan,pan,zhan,chuan,san,man,nuan,suan,shuan,zuan,luan,gan,tuan,cuan=100"},
+            {"o=o=shuo,tuo,zhuo,ruo,bo,kuo,mo,fo,guo,duo,o,huo,suo,luo,zuo,po,cuo,wo,chuo,nuo=100"},
+            {"ong=ong=qiong,ong,rong,tong,cong,xiong,dong,nong,jiong,yong,long,song,chong,gong,kong,hong,zhong,zong=100"},
+            {"ou=ou=you,rou,qiu,dou,shou,diu,sou,mou,zou,niu,jiu,hou,miu,ou,kou,liu,cou,zhou,lou,chou,xiu,gou,fou,tou,pou=100"},
+            {"e=e=se,le,che,ke,re,he,zhe,ge,she,ne,de,ce,ze,e,te,me=100"},
+            {"en=en=cen,ken,ren,zhen,hen,sen,hun,zun,fen,pen,kun,zhun,lun,zen,sun,en,dun,nen,chen,ben,shun,run,shen,cun,tun,wen,chun,gen,gun,men=100"},
+            {"eng=eng=teng,zeng,reng,weng,keng,seng,heng,geng,eng,cheng,sheng,neng,meng,zheng,beng,peng,leng,ceng,deng,feng=100"},
+            {"ei=ei=sui,shei,nei,hei,pei,lei,zhei,tei,chui,tui,rui,zui,hui,zhui,mei,gui,kei,fei,gei,ei,wei,dei,cui,shui,zei,dui,bei,kui=100"},
+            {"ie=ie=qie,nie,mie,ye,die,tie,lie,xie,pie,jie,bie=100"},
+            {"ue=ue=nue,que,jue,yue,lue,xue=100"},
+            {"u=u=wu,ru,ku,nu,lu,gu,bu,shu,zhu,chu,cu,pu,mu,zu,su,hu,tu,fu,u,du=100"},
+            {"v=v=nv,lv,yu,qu,xu,ju=100"},
+            {"vn=vn=jun,xun,qun,yun=100"},
+            {"i=i=yi,bi,ti,ji,ni,xi,li,mi,pi,qi,di,i=100"},
+            {"in=in=bin,jin,lin,qin,pin,yin,nin,min,xin=100"},
+            {"ing=ing=jing,ding,ning,ting,qing,ping,xing,bing,ying,ming,ling=100"},
+            {"ir=ir=ri,shi,zhi,chi=100"},
+            {"iz=iz=si,zi,ci=100"},
+            {"er=er=er=100"},
+            {"ian=ian=quan,xuan,tian,pian,nian,yan,juan,bian,yuan,mian,dian,lian,qian,xian,jian=100"},
         };
         private readonly static List<string> defConsonants = new List<string> {
             { "ch=cha,chang,chao,chai,chan,chong,chou,che,chen,cheng,chi=1" },

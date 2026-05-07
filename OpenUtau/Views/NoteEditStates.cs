@@ -533,6 +533,7 @@ namespace OpenUtau.App.Views {
         }
     }
 
+
     class NotePanningState : NoteEditState {
         public override MouseButton MouseButton => MouseButton.Middle;
         protected override bool ShowValueTip => false;
@@ -890,6 +891,98 @@ namespace OpenUtau.App.Views {
             int maxTick = Math.Max(tick, startTick);
             var curve = notesVm.Part.curves.FirstOrDefault(c => c.abbr == descriptor.abbr);
             vm.CurveViewModel.Select(descriptor, minTick, maxTick, curve);
+        }
+    }
+
+    /// <summary>
+    /// Curve line drawing tool for the parameter/expression canvas.
+    /// - Without ALT: draws a straight line between start and end points.
+    /// - With ALT: draws a horizontal line from the first point's value extended to the end.
+    /// </summary>
+    class ExpLineDrawState : NoteEditState {
+        private Point firstPoint;
+        private int firstTick;
+        private int firstValue;
+        private UExpressionDescriptor? descriptor;
+        private bool useAltMode;
+        protected override string? commandNameKey => "command.exp.linedraw";
+
+        public ExpLineDrawState(
+            Control control,
+            PianoRollViewModel vm,
+            IValueTip valueTip,
+            UExpressionDescriptor descriptor,
+            bool useAltMode) : base(control, vm, valueTip) {
+            this.descriptor = descriptor;
+            this.useAltMode = useAltMode;
+        }
+
+        public override void Begin(IPointer pointer, Point point) {
+            base.Begin(pointer, point);
+            firstPoint = point;
+            var notesVm = vm.NotesViewModel;
+            firstTick = notesVm.PointToTick(point);
+            firstValue = (int)Math.Round(
+                descriptor!.min + (descriptor.max - descriptor.min) * (1 - point.Y / control.Bounds.Height));
+            firstValue = Math.Clamp(firstValue, (int)descriptor.min, (int)descriptor.max);
+        }
+
+        public override void Update(IPointer pointer, Point point) {
+            if (descriptor == null) {
+                return;
+            }
+            var notesVm = vm.NotesViewModel;
+            if (notesVm.Part == null) {
+                return;
+            }
+
+            int currentTick = notesVm.PointToTick(point);
+            int currentValue;
+            int startX, endX, startY, endY;
+
+            if (useAltMode) {
+                // ALT mode: horizontal line from first point's value to the end
+                startX = firstTick;
+                endX = currentTick;
+                startY = firstValue;
+                endY = firstValue;
+            } else {
+                // Normal mode: straight line between start and end
+                currentValue = (int)Math.Round(
+                    descriptor.min + (descriptor.max - descriptor.min) * (1 - point.Y / control.Bounds.Height));
+                currentValue = Math.Clamp(currentValue, (int)descriptor.min, (int)descriptor.max);
+                startX = firstTick;
+                endX = currentTick;
+                startY = firstValue;
+                endY = currentValue;
+            }
+
+            if (startX > endX) {
+                Swap(ref startX, ref endX);
+                Swap(ref startY, ref endY);
+            }
+
+            // Set both endpoints to ensure correct line drawing in any direction
+            if (startX == endX) {
+                // Single point
+                DocManager.Inst.ExecuteCmd(new SetCurveCommand(
+                    notesVm.Project, notesVm.Part, notesVm.PrimaryKey,
+                    startX, startY, startX, startY));
+            } else {
+                // Set start point, then end point.
+                // The second call clears between start and end exclusive, preserving the start point.
+                DocManager.Inst.ExecuteCmd(new SetCurveCommand(
+                    notesVm.Project, notesVm.Part, notesVm.PrimaryKey,
+                    startX, startY, startX, startY));
+                DocManager.Inst.ExecuteCmd(new SetCurveCommand(
+                    notesVm.Project, notesVm.Part, notesVm.PrimaryKey,
+                    endX, endY, startX, startY));
+            }
+
+            valueTip.UpdateValueTip(
+                useAltMode
+                    ? $"→ {firstValue} (ALT)"
+                    : $"({startX}, {startY}) → ({endX}, {endY})");
         }
     }
 

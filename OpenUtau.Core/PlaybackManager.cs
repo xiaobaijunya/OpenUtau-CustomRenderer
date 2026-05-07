@@ -328,13 +328,21 @@ namespace OpenUtau.Core {
         public async Task RenderMixdown(UProject project, string exportPath) {
             await Task.Run(() => {
                 try {
-                    RenderEngine engine = new RenderEngine(project);
-                    var projectMix = engine.RenderMixdown(DocManager.Inst.MainScheduler, ref renderCancellation, wait: true).Item1;
-                    DocManager.Inst.ExecuteCmd(new ProgressBarNotification(0, $"Exporting to {exportPath}."));
-
-                    CheckFileWritable(exportPath);
-                    WaveFileWriter.CreateWaveFile16(exportPath, new ExportAdapter(projectMix).ToMono(1, 0));
-                    DocManager.Inst.ExecuteCmd(new ProgressBarNotification(0, $"Exported to {exportPath}."));
+                    if (CustomRenderEngine.ShouldUseCustomRenderEngine(project)) {
+                        var engine = new CustomRenderEngine(project);
+                        var projectMix = engine.RenderMixdown(DocManager.Inst.MainScheduler, ref renderCancellation, wait: true).Item1;
+                        DocManager.Inst.ExecuteCmd(new ProgressBarNotification(0, $"Exporting to {exportPath}."));
+                        CheckFileWritable(exportPath);
+                        WaveFileWriter.CreateWaveFile16(exportPath, new ExportAdapter(projectMix).ToMono(1, 0));
+                        DocManager.Inst.ExecuteCmd(new ProgressBarNotification(0, $"Exported to {exportPath}."));
+                    } else {
+                        RenderEngine engine = new RenderEngine(project);
+                        var projectMix = engine.RenderMixdown(DocManager.Inst.MainScheduler, ref renderCancellation, wait: true).Item1;
+                        DocManager.Inst.ExecuteCmd(new ProgressBarNotification(0, $"Exporting to {exportPath}."));
+                        CheckFileWritable(exportPath);
+                        WaveFileWriter.CreateWaveFile16(exportPath, new ExportAdapter(projectMix).ToMono(1, 0));
+                        DocManager.Inst.ExecuteCmd(new ProgressBarNotification(0, $"Exported to {exportPath}."));
+                    }
                 } catch (IOException ioe) {
                     var customEx = new MessageCustomizableException($"Failed to export {exportPath}.", $"<translate:errors.failed.export>: {exportPath}", ioe);
                     DocManager.Inst.ExecuteCmd(new ErrorMessageNotification(customEx));
@@ -352,8 +360,14 @@ namespace OpenUtau.Core {
             await Task.Run(() => {
                 string file = "";
                 try {
-                    RenderEngine engine = new RenderEngine(project);
-                    var trackMixes = engine.RenderTracks(DocManager.Inst.MainScheduler, ref renderCancellation);
+                    List<WaveMix> trackMixes;
+                    if (CustomRenderEngine.ShouldUseCustomRenderEngine(project)) {
+                        var engine = new CustomRenderEngine(project);
+                        trackMixes = engine.RenderTracks(DocManager.Inst.MainScheduler, ref renderCancellation);
+                    } else {
+                        RenderEngine engine = new RenderEngine(project);
+                        trackMixes = engine.RenderTracks(DocManager.Inst.MainScheduler, ref renderCancellation);
+                    }
                     for (int i = 0; i < trackMixes.Count; ++i) {
                         if (trackMixes[i] == null || i >= project.tracks.Count || project.tracks[i].Muted) {
                             continue;

@@ -9,7 +9,7 @@ using OpenUtau.Core.Ustx;
 using Serilog;
 
 namespace OpenUtau.Plugin.Builtin {
-    [Phonemizer("Chinese VOCALOID Phonemizer", "ZH VOCALOID", language: "ZH")]
+    [Phonemizer("Chinese CV-V-VC Phonemizer", "ZH CV-V-VC", language: "ZH")]
     public class ChineseVOCALOIDPhonemizer : Phonemizer {
         private Dictionary<string, string[]> phonemeDict = new Dictionary<string, string[]>();
         private Dictionary<string, string> vowelDict = new Dictionary<string, string>();
