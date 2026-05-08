@@ -200,7 +200,7 @@ namespace OpenUtau.App.Controls {
                 EditNoteDefaults();
             });
 
-            AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel | RoutingStrategies.Bubble);
+            AddHandler(KeyDownEvent, OnKeyDown);
 
             DocManager.Inst.AddSubscriber(this);
         }
@@ -885,7 +885,7 @@ namespace OpenUtau.App.Controls {
                 return;
             }
             if (notesVm.DrawPitchTool && args.KeyModifiers != cmdKey) {
-                Cursor = ViewConstants.cursorDrawPitch;
+                Cursor = null;
                 return;
             }
             if ((notesVm.DrawLinePitchTool || notesVm.OverwritePitchTool || notesVm.OverwriteLinePitchTool) && args.KeyModifiers != cmdKey) {
@@ -933,12 +933,8 @@ namespace OpenUtau.App.Controls {
                 Cursor = ViewConstants.cursorKnife;
                 return;
             }
-            if (notesVm.PenTool && !noteHitInfo.hitBody) {
-                Cursor = ViewConstants.cursorPen;
-                return;
-            }
-            if (notesVm.PenPlusTool && !noteHitInfo.hitBody) {
-                Cursor = ViewConstants.cursorPenPlus;
+            if ((notesVm.PenTool || notesVm.PenPlusTool) && !noteHitInfo.hitBody) {
+                Cursor = null;
                 return;
             }
             if (!noteHitInfo.hitBody && (notesVm.CursorTool || args.KeyModifiers == cmdKey)) {
@@ -1366,12 +1362,13 @@ namespace OpenUtau.App.Controls {
             }
 
             if (RootWindow.FocusManager != null) {
-                if (RootWindow.FocusManager.GetFocusedElement() is TextBox focusedTextBox) {
-                    if (focusedTextBox.IsEnabled && focusedTextBox.IsEffectivelyVisible && focusedTextBox.IsFocused) {
+                var focused = RootWindow.FocusManager.GetFocusedElement();
+                if (focused is TextBox focusedTextBox) {
+                    if (focusedTextBox.IsEnabled && focusedTextBox.IsEffectivelyVisible) {
                         args.Handled = false;
                         return;
                     }
-                } else if (RootWindow.FocusManager.GetFocusedElement() is ComboBox or ComboBoxItem) {
+                } else if (focused is ComboBox or ComboBoxItem or ListBoxItem) {
                     args.Handled = false;
                     return;
                 }

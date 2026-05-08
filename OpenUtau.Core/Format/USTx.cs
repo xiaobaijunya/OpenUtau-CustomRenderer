@@ -37,6 +37,7 @@ namespace OpenUtau.Core.Format {
         public const string GWL = "gwl";
         public const string PHTP = "phtp";
         public const string PHTD = "phtd";
+        public const string STRT = "strt";
 
         public static readonly string[] required = { DYN, PITD, CLR, ENG, VEL, VOL, ATK, DEC };
 
@@ -51,10 +52,10 @@ namespace OpenUtau.Core.Format {
             project.RegisterExpression(new UExpressionDescriptor("decay", DEC, 0, 100, 0));
             project.RegisterExpression(new UExpressionDescriptor("gender", GEN, -100, 100, 0, "g"));
             project.RegisterExpression(new UExpressionDescriptor("gender (curve)", GENC, -100, 100, 0) { type = UExpressionType.Curve });
-            project.RegisterExpression(new UExpressionDescriptor("breath", BRE, 0, 100, 0, "B"));
+            project.RegisterExpression(new UExpressionDescriptor("breath", BRE, 0, 100, 50, "B"));
             project.RegisterExpression(new UExpressionDescriptor("breathiness (curve)", BREC, -100, 100, 0) { type = UExpressionType.Curve });
             project.RegisterExpression(new UExpressionDescriptor("lowpass", LPF, 0, 100, 0, "H"));
-            project.RegisterExpression(new UExpressionDescriptor("normalize", NORM, 0, 100, 86, "P"));
+            project.RegisterExpression(new UExpressionDescriptor("normalize", NORM, 0, 100, 0, "P"));
             project.RegisterExpression(new UExpressionDescriptor("modulation", MOD, 0, 100, 0));
             project.RegisterExpression(new UExpressionDescriptor("modulation plus", MODP, 0, 100, 0));
             project.RegisterExpression(new UExpressionDescriptor("alternate", ALT, 0, 16, 0));
@@ -65,6 +66,7 @@ namespace OpenUtau.Core.Format {
             project.RegisterExpression(new UExpressionDescriptor("voicing (curve)", VOIC, 0, 100, 100) { type = UExpressionType.Curve });
             project.RegisterExpression(new UExpressionDescriptor("growl (curve)", GWL, 0, 100, 0) { type = UExpressionType.Curve });
             project.RegisterExpression(new UExpressionDescriptor("volume normalize", PHTP, false, new string[] { "none", "backward", "forward" }));
+            project.RegisterExpression(new UExpressionDescriptor("stretch mode", STRT, false, new string[] { "normal", "loop" }));
 
             string message = string.Empty;
             if (ValidateExpression(project, "g", GEN)) {

@@ -23,12 +23,12 @@ namespace OpenUtau.App.Views {
         }
         public void Begin(IPointer pointer, Point point) {
             pointer.Capture(element);
-            var tone = vm.NotesViewModel.PointToTone(point);
+            var tone = vm.NotesViewModel.PointToTone(point) + 12;
             PlaybackManager.Inst.PlayTone(MusicMath.ToneToFreq(tone));
             activeTone = tone;
         }
         public void Update(IPointer pointer, Point point) {
-            var tone = vm.NotesViewModel.PointToTone(point);
+            var tone = vm.NotesViewModel.PointToTone(point) + 12;
             if (activeTone != tone) {
                 PlaybackManager.Inst.EndTone(MusicMath.ToneToFreq(activeTone));
                 PlaybackManager.Inst.PlayTone(MusicMath.ToneToFreq(tone));

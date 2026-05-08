@@ -134,6 +134,8 @@ namespace OpenUtau.Core.CustomRender {
                         Log.Debug($"CustomServerRenderer reusing in-flight HTTP task for hash {phrase.hash:x16}");
                     } else {
                         var jsonData = preGeneratedJson ?? ConvertPhraseToJson(phrase);
+                        // 可选：将 JSON 写入文件
+                        SaveJsonToFile(jsonData, phrase);
                         // 使用 CancellationToken.None：即使播放被取消，HTTP 请求也继续完成，
                         // 确保后端结果被缓存，避免下次播放重复提交。
                         httpTask = SendToServerAsync(jsonData, CancellationToken.None);
@@ -293,7 +295,8 @@ namespace OpenUtau.Core.CustomRender {
                     { "vol", phone.volume * 100.0 },
                     { "mod", phone.modulation * 100.0 },
                     { "shft", phone.toneShift },
-                    { "phtp", phone.phonemeType }
+                    { "phtp", phone.phonemeType },
+                    { "strt", phone.stretchMode }
                 };
                 foreach (var flag in phone.flags) {
                     // flag: Tuple<flagName, int?, abbr>
@@ -383,6 +386,19 @@ namespace OpenUtau.Core.CustomRender {
             double totalDurationMs = phrase.durationMs + phrase.leadingMs;
             result.samples = new float[(int)(totalDurationMs * 44.1)];
             return result;
+        }
+
+        /// <summary>
+        /// 将 JSON 写入缓存目录，便于调试。
+        /// </summary>
+        private static void SaveJsonToFile(string json, RenderPhrase phrase) {
+            try {
+                var jsonPath = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.json");
+                File.WriteAllText(jsonPath, json, Encoding.UTF8);
+                Log.Debug($"CustomServerRenderer saved JSON to {jsonPath}");
+            } catch (Exception e) {
+                Log.Error(e, "Failed to save CustomServer JSON file");
+            }
         }
 
         /// <summary>
