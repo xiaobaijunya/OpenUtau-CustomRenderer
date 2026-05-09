@@ -24,10 +24,12 @@ namespace OpenUtau.Plugin.Builtin {
             }
             string consonant = consonants.TryGetValue(lyric, out consonant) ? consonant : lyric;
             string prevVowel = "-";
+            bool prevIsVowel = false;
             if (prevNeighbour != null) {
                 var prevLyric = prevNeighbour.Value.lyric;
                 if (vowels.TryGetValue(prevLyric, out var vowel)) {
                     prevVowel = vowel;
+                    prevIsVowel = true;
                 }
             };
             var attr0 = notes[0].phonemeAttributes?.FirstOrDefault(attr => attr.index == 0) ?? default;
@@ -43,8 +45,8 @@ namespace OpenUtau.Plugin.Builtin {
             int totalDuration = notes.Sum(n => n.duration); // totalDuration of current note
 
             if (singer.TryGetMappedOto($"{prevVowel} {lyric}", notes[0].tone + attr0.toneShift, attr0.voiceColor, out var oto)) {
-                // V-V 连接：当前歌词是元音时 phtp=2，V-C 连接保持 phtp=0
-                bool isVV = vowels.ContainsKey(lyric);
+                // V-V 连接：上一个和当前歌词都是元音时 phtp=2，否则 phtp=0
+                bool isVV = prevIsVowel && vowels.ContainsKey(lyric);
                 int phtp = isVV ? 2 : 0;
                 if (nextNeighbour == null && singer.TryGetMappedOto($"{currVowel} R", notes[0].tone + attr1.toneShift, attr1.voiceColor, out var oto1)) {
                     // automatically add ending if present
