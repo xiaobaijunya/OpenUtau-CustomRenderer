@@ -43,15 +43,15 @@ namespace OpenUtau.Core.Format {
 
         public static void AddDefaultExpressions(UProject project) {
             project.RegisterExpression(new UExpressionDescriptor("dynamics (curve)", DYN, -240, 120, 0) { type = UExpressionType.Curve });
-            project.RegisterExpression(new UExpressionDescriptor("pitch deviation (curve)", PITD, -1200, 1200, 0) { type = UExpressionType.Curve });
+            project.RegisterExpression(new UExpressionDescriptor("pitch deviation (curve)", PITD, -2400, 2400, 0) { type = UExpressionType.Curve });
             project.RegisterExpression(new UExpressionDescriptor("voice color", CLR, false, new string[0]));
             project.RegisterExpression(new UExpressionDescriptor("resampler engine", ENG, false, new string[] { "", WorldlineResampler.name }));
-            project.RegisterExpression(new UExpressionDescriptor("velocity", VEL, 0, 200, 100));
+            project.RegisterExpression(new UExpressionDescriptor("velocity", VEL, 0, 300, 100));
             project.RegisterExpression(new UExpressionDescriptor("volume", VOL, 0, 200, 100));
             project.RegisterExpression(new UExpressionDescriptor("attack", ATK, 0, 200, 100));
             project.RegisterExpression(new UExpressionDescriptor("decay", DEC, 0, 100, 0));
             project.RegisterExpression(new UExpressionDescriptor("gender", GEN, -100, 100, 0, "g"));
-            project.RegisterExpression(new UExpressionDescriptor("gender (curve)", GENC, -100, 100, 0) { type = UExpressionType.Curve });
+            project.RegisterExpression(new UExpressionDescriptor("gender (curve)", GENC, -200, 200, 0) { type = UExpressionType.Curve });
             project.RegisterExpression(new UExpressionDescriptor("breath", BRE, 0, 100, 50, "B"));
             project.RegisterExpression(new UExpressionDescriptor("breathiness (curve)", BREC, -100, 100, 0) { type = UExpressionType.Curve });
             project.RegisterExpression(new UExpressionDescriptor("lowpass", LPF, 0, 100, 0, "H"));
