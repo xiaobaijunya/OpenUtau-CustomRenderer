@@ -49,9 +49,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - uses: repolevedavaj/install-nsis@v1.0.3
-        with:
-          nsis-version: '3.11'
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          $nsisUrl = "https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download"
+          $outFile = "C:\WINDOWS\Temp\nsis-3.11-setup.exe"
+          Write-Host "Downloading NSIS 3.11..."
+          Invoke-WebRequest -Uri $nsisUrl -OutFile $outFile -UseBasicParsing
+          if (-not (Test-Path $outFile) -or ((Get-Item $outFile).Length -lt 1MB)) {
+            Write-Host "Download failed or file too small, trying alternative mirror..."
+            $nsisUrl = "https://netcologne.dl.sourceforge.net/project/nsis/NSIS%203/3.11/nsis-3.11-setup.exe?viasf=1"
+            Invoke-WebRequest -Uri $nsisUrl -OutFile $outFile -UseBasicParsing
+          }
+          Write-Host "Installing NSIS..."
+          $process = Start-Process -FilePath $outFile -ArgumentList "/S" -Wait -PassThru
+          if ($process.ExitCode -eq 0) {
+            Write-Host "NSIS installed successfully."
+          } else {
+            Write-Host "NSIS installer failed with exit code $($process.ExitCode)."
+            exit $process.ExitCode
+          }
+          echo "C:\Program Files (x86)\NSIS\Bin" | Out-File -FilePath "$env:GITHUB_PATH" -Append
         if: ${{ matrix.arch.os == 'win' }}
       - uses: justalemon/VersionPatcher@v0.7.1
         with:
