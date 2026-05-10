@@ -49,28 +49,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install NSIS
-        shell: pwsh
-        run: |
-          $nsisUrl = "https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download"
-          $outFile = "C:\WINDOWS\Temp\nsis-3.11-setup.exe"
-          Write-Host "Downloading NSIS 3.11..."
-          Invoke-WebRequest -Uri $nsisUrl -OutFile $outFile -UseBasicParsing
-          if (-not (Test-Path $outFile) -or ((Get-Item $outFile).Length -lt 1MB)) {
-            Write-Host "Download failed or file too small, trying alternative mirror..."
-            $nsisUrl = "https://netcologne.dl.sourceforge.net/project/nsis/NSIS%203/3.11/nsis-3.11-setup.exe?viasf=1"
-            Invoke-WebRequest -Uri $nsisUrl -OutFile $outFile -UseBasicParsing
-          }
-          Write-Host "Installing NSIS..."
-          $process = Start-Process -FilePath $outFile -ArgumentList "/S" -Wait -PassThru
-          if ($process.ExitCode -eq 0) {
-            Write-Host "NSIS installed successfully."
-          } else {
-            Write-Host "NSIS installer failed with exit code $($process.ExitCode)."
-            exit $process.ExitCode
-          }
-          echo "C:\Program Files (x86)\NSIS\Bin" | Out-File -FilePath "$env:GITHUB_PATH" -Append
-        if: ${{ matrix.arch.os == 'win' }}
+
       - uses: justalemon/VersionPatcher@v0.7.1
         with:
           version: ${{ inputs.version }}
@@ -110,107 +89,42 @@ jobs:
         run: chmod +x bin/${{ matrix.arch.name }}/OpenUtau
         if: ${{ matrix.arch.os == 'linux' }}
 
-      - name: Zip
-        run: |
-          cd bin/${{ matrix.arch.name }}
-          7z a ../../OpenUtau-${{ matrix.arch.name }}.zip *
-        if: ${{ matrix.arch.os == 'win' }}
-
-      - name: Tar.gz
-        run: |
-          cd bin/${{ matrix.arch.name }}
-          tar -czf ../../OpenUtau-${{ matrix.arch.name }}.tar.gz *
-        if: ${{ matrix.arch.os == 'linux' }}
-
-      # Create Installer
-      - name: Get VC Redist
-        run: |
-          curl https://aka.ms/vs/17/release/vc_redist.${{ matrix.arch.arch }}.exe -o vc_redist.${{ matrix.arch.arch }}.exe
-        if: ${{ matrix.arch.os == 'win' }}
-
-      - name: Create Installer
-        uses: joncloud/makensis-action@v4.1
-        with:
-          script-file: OpenUtau.nsi
-          arguments: "-DPRODUCT_VERSION=${{ inputs.version }} -DARCH=${{ matrix.arch.arch }}"
-        if: ${{ matrix.arch.os == 'win' }}
-
-      # Create Dmg
-      - name: Create Dmg
-        run: |
-          npm install -g create-dmg
-          cp OpenUtau/Assets/OpenUtau.icns bin/${{ matrix.arch.name }}/publish/OpenUtau.app/Contents/Resources/
-          create-dmg bin/${{ matrix.arch.name }}/publish/OpenUtau.app || true
-          mv *.dmg OpenUtau-${{ matrix.arch.name }}.dmg
-          codesign -fvs - OpenUtau-${{ matrix.arch.name }}.dmg
-        if: ${{ matrix.arch.os == 'osx' }}
-
-      # Create Appimage
-      - name: Install LinuxDeploy
-        uses: AnimMouse/setup-appimage@v1
-        with:
-          name: linuxdeploy
-          url: https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-        if: ${{ matrix.arch.os == 'linux' }}
-
-      - name: Create appimage
-        run: |
-          cp OpenUtau/Assets/OpenUtau.desktop bin/${{ matrix.arch.name }}
-          cp OpenUtau/Assets/OpenUtau.png bin/${{ matrix.arch.name }}
-          cp OpenUtau/Assets/OpenUtau.png bin/${{ matrix.arch.name }}/.DirIcon
-          cp OpenUtau/Assets/AppRun bin/${{ matrix.arch.name }}
-          chmod 755 bin/${{ matrix.arch.name }}/AppRun
-          ARCH=${{ matrix.arch.linuxarch }} linuxdeploy --appdir bin/${{ matrix.arch.name }} --output appimage
-        if: ${{ matrix.arch.os == 'linux' }}
-
-      # Upload Artifacts
+      # Upload Artifacts (non-release only, GitHub will zip the directory once)
       - uses: actions/upload-artifact@v4
         with:
-          name: OpenUtau-${{ matrix.arch.name }}.tar.gz
-          path: OpenUtau-${{ matrix.arch.name }}.tar.gz
-        if: ${{ !inputs.release && matrix.arch.os == 'linux' }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: OpenUtau-${{ matrix.arch.name }}.zip
-          path: OpenUtau-${{ matrix.arch.name }}.zip
-        if: ${{ !inputs.release && matrix.arch.os == 'win' }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: OpenUtau-${{ matrix.arch.name }}.exe
-          path: OpenUtau-${{ matrix.arch.name }}.exe
-        if: ${{ !inputs.release && matrix.arch.os == 'win' }}
-      
-      - uses: actions/upload-artifact@v4
-        with:
-          name: OpenUtau-${{ matrix.arch.name }}.AppImage
-          path: OpenUtau-${{ matrix.arch.linuxarch }}.AppImage
-        if: ${{ !inputs.release && matrix.arch.os == 'linux' }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: OpenUtau-${{ matrix.arch.name }}.dmg
-          path: OpenUtau-${{ matrix.arch.name }}.dmg
-        if: ${{ !inputs.release && matrix.arch.os == 'osx' }}
+          name: OpenUtau-${{ matrix.arch.name }}
+          path: bin/${{ matrix.arch.name }}/
+        if: ${{ !inputs.release }}
 
       # Appcast
       - name: Appcast Windows
         shell: cmd
         run: |
           python appcast.py -v=${{ inputs.version }} -o=windows -r=${{ matrix.arch.name }} -f=OpenUtau-${{ matrix.arch.name }}.zip
-          python appcast.py -v=${{ inputs.version }} -o=windows -r=${{ matrix.arch.name }}-installer -f=OpenUtau-${{ matrix.arch.name }}.exe
         if: ${{ inputs.release && matrix.arch.os == 'win' }}
 
-      - name: Appcast MacOS
+      - name: Appcast macOS
         run: |
-          python appcast.py -v=${{ inputs.version }} -o=macos -r=${{ matrix.arch.name }} -f=OpenUtau-${{ matrix.arch.name }}.dmg
+          python appcast.py -v=${{ inputs.version }} -o=macos -r=${{ matrix.arch.name }} -f=OpenUtau-${{ matrix.arch.name }}.zip
         if: ${{ inputs.release && matrix.arch.os == 'osx' }}
 
       - name: Appcast Linux
         run: |
-          python appcast.py -v=${{ inputs.version }} -o=linux -r=${{ matrix.arch.name }} -f=OpenUtau-${{ matrix.arch.name }}.tar.gz
+          python appcast.py -v=${{ inputs.version }} -o=linux -r=${{ matrix.arch.name }} -f=OpenUtau-${{ matrix.arch.name }}.zip
         if: ${{ inputs.release && matrix.arch.os == 'linux' }}
+
+      # Create Zip for Release
+      - name: Create Zip (Windows)
+        run: |
+          cd bin/${{ matrix.arch.name }}
+          7z a ../../OpenUtau-${{ matrix.arch.name }}.zip *
+        if: ${{ inputs.release && matrix.arch.os == 'win' }}
+
+      - name: Create Zip (Linux/macOS)
+        run: |
+          cd bin/${{ matrix.arch.name }}
+          zip -r ../../OpenUtau-${{ matrix.arch.name }}.zip *
+        if: ${{ inputs.release && matrix.arch.os != 'win' }}
 
       # Release
       - name: Release
@@ -222,7 +136,7 @@ jobs:
           draft: ${{ inputs.draft }}
           files: |
             appcast.${{ matrix.arch.name }}*.xml
-            OpenUtau-${{ matrix.arch.name }}.*
+            OpenUtau-${{ matrix.arch.name }}.zip
           body: |
             See [Getting Started](https://github.com/stakira/OpenUtau/wiki/Getting-Started) for how to use.
 
