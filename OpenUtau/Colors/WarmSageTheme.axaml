@@ -1,0 +1,53 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:system="clr-namespace:System;assembly=mscorlib"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <system:Boolean x:Key="IsDarkMode">true</system:Boolean>
+  
+  <!-- 暖灰背景，减少蓝光刺激 -->
+  <Color x:Key="BackgroundColor">#2C2A28</Color>
+  <Color x:Key="BackgroundColorPointerOver">#3D3A37</Color>
+  <Color x:Key="BackgroundColorPressed">#4F4B47</Color>
+  <Color x:Key="BackgroundColorDisabled">#383634</Color>
+
+  <!-- 暖白前景 -->
+  <Color x:Key="ForegroundColor">#E8E0D8</Color>
+  <Color x:Key="ForegroundColorPointerOver">#F5F0EB</Color>
+  <Color x:Key="ForegroundColorPressed">#FFFFFF</Color>
+  <Color x:Key="ForegroundColorDisabled">#908A84</Color>
+
+  <Color x:Key="BorderColor">#5A5550</Color>
+  <Color x:Key="BorderColorPointerOver">#7A746E</Color>
+
+  <!-- 暖强调色（琥珀金，替代蓝色） -->
+  <Color x:Key="SystemAccentColor">#D4A853</Color>
+  <Color x:Key="SystemAccentColorLight1">#E8C876</Color>
+  <Color x:Key="SystemAccentColorDark1">#B8893A</Color>
+
+  <Color x:Key="NeutralAccentColor">#6B6560</Color>
+  <Color x:Key="NeutralAccentColorPointerOver">#8A837D</Color>
+  <!-- 音符主色：鼠尾草绿，护眼 -->
+  <Color x:Key="AccentColor1">#6B9E7A</Color>
+  <!-- 选中音符：暖杏色 -->
+  <Color x:Key="AccentColor2">#D4876A</Color>
+  <Color x:Key="AccentColor3">#B86C50</Color>
+
+  <Color x:Key="TickLineColor">#4A4642</Color>
+  <Color x:Key="BarNumberColor">#B0A89E</Color>
+  <Color x:Key="FinalPitchColor">#C0B8AE</Color>
+  <Color x:Key="TrackBackgroundAltColor">#353330</Color>
+  
+  <Color x:Key="WarningColor">#4A3E28</Color>
+
+  <!--Keyboard Background-->
+  <Color x:Key="WhiteKeyColorLeft">#D4876A</Color>
+  <Color x:Key="WhiteKeyColorRight">#E89E80</Color>
+  <Color x:Key="WhiteKeyNameColor">#FFFFFF</Color>
+
+  <Color x:Key="CenterKeyColorLeft">#B8A088</Color>
+  <Color x:Key="CenterKeyColorRight">#D4BFA8</Color>
+  <Color x:Key="CenterKeyNameColor">#D4876A</Color>
+
+  <Color x:Key="BlackKeyColorLeft">Transparent</Color>
+  <Color x:Key="BlackKeyColorRight">Transparent</Color>
+  <Color x:Key="BlackKeyNameColor">#E0D8D0</Color>
+</ResourceDictionary>
