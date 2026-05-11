@@ -69,10 +69,12 @@ namespace OpenUtau.Core {
         public bool IsInstalled { get; private set; }
         public string SingersPathOld => Path.Combine(DataPath, "Content", "Singers");
         public string SingersPath => Path.Combine(DataPath, "Singers");
-        public string AdditionalSingersPath => Preferences.Default.AdditionalSingerPath;
+        public List<string> AdditionalSingersPaths => Preferences.Default.AdditionalSingerPaths
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .ToList();
         public string SingersInstallPath => Preferences.Default.InstallToAdditionalSingersPath
-            && !string.IsNullOrEmpty(Preferences.Default.AdditionalSingerPath)
-                ? AdditionalSingersPath
+            && AdditionalSingersPaths.Count > 0
+                ? AdditionalSingersPaths[0]
                 : SingersPath;
         public string ResamplersPath => Path.Combine(DataPath, "Resamplers");
         public string WavtoolsPath => Path.Combine(DataPath, "Wavtools");
@@ -93,9 +95,7 @@ namespace OpenUtau.Core {
                 if (Directory.Exists(SingersPathOld)) {
                     list.Add(SingersPathOld);
                 }
-                if (Directory.Exists(AdditionalSingersPath)) {
-                    list.Add(AdditionalSingersPath);
-                }
+                list.AddRange(AdditionalSingersPaths.Where(Directory.Exists));
                 return list.Distinct().ToList();
             }
         }

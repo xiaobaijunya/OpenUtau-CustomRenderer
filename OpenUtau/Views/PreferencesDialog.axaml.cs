@@ -26,18 +26,8 @@ namespace OpenUtau.App.Views {
             }
         }
 
-        void OpenAddlSingersFolder(object sender, RoutedEventArgs e) {
-            try {
-                if (Directory.Exists(viewModel!.AdditionalSingersPath)) {
-                    OS.OpenFolder(viewModel!.AdditionalSingersPath);
-                }
-            } catch (Exception ex) {
-                DocManager.Inst.ExecuteCmd(new ErrorMessageNotification(ex));
-            }
-        }
-
         void ResetAddlSingersPath(object sender, RoutedEventArgs e) {
-            viewModel!.SetAddlSingersPath(string.Empty);
+            viewModel!.ResetAddlSingersPaths();
         }
 
         async void SelectAddlSingersPath(object sender, RoutedEventArgs e) {
@@ -47,6 +37,12 @@ namespace OpenUtau.App.Views {
             }
             if (Directory.Exists(path)) {
                 viewModel!.SetAddlSingersPath(path);
+            }
+        }
+
+        void RemoveAddlSingersPath(object sender, RoutedEventArgs e) {
+            if (sender is Button button && button.Tag is string path) {
+                viewModel!.RemoveAddlSingersPath(path);
             }
         }
 

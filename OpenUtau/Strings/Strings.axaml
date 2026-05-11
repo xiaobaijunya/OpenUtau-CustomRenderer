@@ -596,6 +596,8 @@ Warning: this option removes custom presets.</system:String>
   <system:String x:Key="prefs.paths.open">Open</system:String>
   <system:String x:Key="prefs.paths.reset">Reset</system:String>
   <system:String x:Key="prefs.paths.select">Select</system:String>
+  <system:String x:Key="prefs.paths.add">Add</system:String>
+  <system:String x:Key="prefs.paths.remove">Remove</system:String>
   <system:String x:Key="prefs.paths.singer">Singer Path</system:String>
   <system:String x:Key="prefs.penplus">Set Pen Plus Tool as Default</system:String>
   <system:String x:Key="prefs.playback">Playback</system:String>

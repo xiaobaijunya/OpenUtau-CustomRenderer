@@ -342,17 +342,20 @@ namespace OpenUtau.App.ViewModels {
                     }
                 })
             });
-            if (!string.IsNullOrWhiteSpace(PathManager.Inst.AdditionalSingersPath) && Directory.Exists(PathManager.Inst.AdditionalSingersPath)) {
-                items.Add(new MenuItemViewModel() {
-                    Header = ThemeManager.GetString("tracks.openaddsingers"),
-                    Command = ReactiveCommand.Create(() => {
-                        try {
-                            OS.OpenFolder(PathManager.Inst.AdditionalSingersPath);
-                        } catch (Exception e) {
-                            DocManager.Inst.ExecuteCmd(new ErrorMessageNotification(e));
-                        }
-                    })
-                });
+            var addlPaths = PathManager.Inst.AdditionalSingersPaths;
+            foreach (var addlPath in addlPaths) {
+                if (Directory.Exists(addlPath)) {
+                    items.Add(new MenuItemViewModel() {
+                        Header = ThemeManager.GetString("tracks.openaddsingers"),
+                        Command = ReactiveCommand.Create(() => {
+                            try {
+                                OS.OpenFolder(addlPath);
+                            } catch (Exception e) {
+                                DocManager.Inst.ExecuteCmd(new ErrorMessageNotification(e));
+                            }
+                        })
+                    });
+                }
             }
             items.Add(new MenuItemViewModel() {
                 Header = ThemeManager.GetString("singers.refresh"),
