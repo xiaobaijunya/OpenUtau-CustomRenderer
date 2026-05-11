@@ -16,11 +16,13 @@ namespace OpenUtau.Core.CustomRender {
         /// 需要通过 RenderPhrase.curves 或修改 RenderPhrase 访问。
         /// </summary>
         private static readonly Dictionary<string, double> CurveDefaults = new Dictionary<string, double> {
-            { "pitd", 0 },
             { "genc", 0 },
             { "brec", 0 },
             { "tenc", 0 },
             { "voic", 100 },
+            { "lowc", 0 },
+            { "brel", 0 },
+            { "breh", 0 },
         };
 
         /// <summary>
@@ -68,6 +70,24 @@ namespace OpenUtau.Core.CustomRender {
                     i => {
                         int ticks = GetTicks(phrase, i, frameMs);
                         return phrase.voicing![ClampIndex(ticks, phrase.voicing.Length)];
+                    }),
+                ("lowc",
+                    () => phrase.lowcut != null && phrase.lowcut.Length > 0,
+                    i => {
+                        int ticks = GetTicks(phrase, i, frameMs);
+                        return phrase.lowcut![ClampIndex(ticks, phrase.lowcut.Length)];
+                    }),
+                ("brel",
+                    () => phrase.breathLow != null && phrase.breathLow.Length > 0,
+                    i => {
+                        int ticks = GetTicks(phrase, i, frameMs);
+                        return phrase.breathLow![ClampIndex(ticks, phrase.breathLow.Length)];
+                    }),
+                ("breh",
+                    () => phrase.breathHigh != null && phrase.breathHigh.Length > 0,
+                    i => {
+                        int ticks = GetTicks(phrase, i, frameMs);
+                        return phrase.breathHigh![ClampIndex(ticks, phrase.breathHigh.Length)];
                     }),
             };
 
@@ -123,38 +143,13 @@ namespace OpenUtau.Core.CustomRender {
             int endFrame = Math.Min(totalFrames, (int)Math.Ceiling((phoneEndMs - phraseBaseMs) / frameMs));
             int phoneFrames = Math.Max(1, endFrame - startFrame);
 
-            // 标准曲线
+            // 标准曲线（逐音素只保留 genc，其他曲线在全局层面传递）
             var standardCurves = new (string abbr, Func<bool> hasData, Func<int, double> sample)[] {
-                ("pitd",
-                    () => phrase.pitches != null && phrase.pitches.Length > 0,
-                    i => {
-                        int ticks = GetTicks(phrase, i, frameMs);
-                        int idx = ClampIndex(ticks, phrase.pitches!.Length);
-                        return MusicMath.ToneToFreq(phrase.pitches[idx] * 0.01);
-                    }),
                 ("genc",
                     () => phrase.gender != null && phrase.gender.Length > 0,
                     i => {
                         int ticks = GetTicks(phrase, i, frameMs);
                         return phrase.gender![ClampIndex(ticks, phrase.gender.Length)];
-                    }),
-                ("brec",
-                    () => phrase.breathiness != null && phrase.breathiness.Length > 0,
-                    i => {
-                        int ticks = GetTicks(phrase, i, frameMs);
-                        return phrase.breathiness![ClampIndex(ticks, phrase.breathiness.Length)];
-                    }),
-                ("tenc",
-                    () => phrase.tension != null && phrase.tension.Length > 0,
-                    i => {
-                        int ticks = GetTicks(phrase, i, frameMs);
-                        return phrase.tension![ClampIndex(ticks, phrase.tension.Length)];
-                    }),
-                ("voic",
-                    () => phrase.voicing != null && phrase.voicing.Length > 0,
-                    i => {
-                        int ticks = GetTicks(phrase, i, frameMs);
-                        return phrase.voicing![ClampIndex(ticks, phrase.voicing.Length)];
                     }),
             };
 

@@ -233,7 +233,7 @@ namespace OpenUtau.Core.CustomRender {
             var dynamicParam = new Dictionary<string, object?>();
 
             // 已知的标准曲线
-            var knownCurves = new[] { "pitd", "genc", "brec", "tenc", "voic" };
+            var knownCurves = new[] { "pitd", "genc", "brec", "tenc", "voic", "lowc", "brel", "breh" };
             foreach (var abbr in knownCurves) {
                 if (curves.TryGetValue(abbr, out var data)) {
                     dynamicParam[abbr] = data;

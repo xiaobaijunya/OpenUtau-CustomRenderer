@@ -196,6 +196,9 @@ namespace OpenUtau.Core.Render {
         public readonly float[] toneShift;
         public readonly float[] tension;
         public readonly float[] voicing;
+        public readonly float[] lowcut;
+        public readonly float[] breathLow;
+        public readonly float[] breathHigh;
         public readonly Tuple<string, float[]>[] curves;//custom curves defined by renderer
         public readonly ulong preEffectHash;
         public readonly ulong hash;
@@ -451,6 +454,9 @@ namespace OpenUtau.Core.Render {
                     case Format.Ustx.TENC: tension = curveSampled; break;
                     case Format.Ustx.BREC: breathiness = curveSampled; break;
                     case Format.Ustx.VOIC: voicing = curveSampled; break;
+                    case Format.Ustx.LOWC: lowcut = curveSampled; break;
+                    case Format.Ustx.BREL: breathLow = curveSampled; break;
+                    case Format.Ustx.BREH: breathHigh = curveSampled; break;
                     default:
                         curves.Add(Tuple.Create(curve.abbr,curveSampled));
                         break;
@@ -507,7 +513,7 @@ namespace OpenUtau.Core.Render {
                         writer.Write(phone.hash);
                     }
                     if (postEffect) {
-                        foreach (var array in new float[][] { pitches, dynamics, gender, breathiness, toneShift, tension, voicing }) {
+                        foreach (var array in new float[][] { pitches, dynamics, gender, breathiness, toneShift, tension, voicing, lowcut, breathLow, breathHigh }) {
                             if (array == null) {
                                 writer.Write("null");
                             } else {
