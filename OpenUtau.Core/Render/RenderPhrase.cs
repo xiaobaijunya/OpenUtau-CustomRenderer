@@ -79,6 +79,8 @@ namespace OpenUtau.Core.Render {
         public readonly int phonemeType;
         // stretch mode (STRT): 0=normal, 1=loop
         public readonly int stretchMode;
+        // splice mode (SPLC): 0=default, 1=old splicing
+        public readonly int spliceMode;
 
         public readonly UOto oto;
         public readonly ulong hash;
@@ -134,6 +136,7 @@ namespace OpenUtau.Core.Render {
             toneShift = (int)phoneme.GetExpression(project, track, Format.Ustx.SHFT).Item1;
             phonemeType = (int)phoneme.GetExpression(project, track, Format.Ustx.PHTP).Item1;
             stretchMode = (int)phoneme.GetExpression(project, track, Format.Ustx.STRT).Item1;
+            spliceMode = (int)phoneme.GetExpression(project, track, Format.Ustx.SPLC).Item1;
 
             oto = phoneme.oto;
             hash = Hash();
@@ -147,6 +150,7 @@ namespace OpenUtau.Core.Render {
                     writer.Write(tone);
                     writer.Write(phonemeType);
                     writer.Write(stretchMode);
+                    writer.Write(spliceMode);
 
                     writer.Write(resampler ?? string.Empty);
                     foreach (var flag in flags) {

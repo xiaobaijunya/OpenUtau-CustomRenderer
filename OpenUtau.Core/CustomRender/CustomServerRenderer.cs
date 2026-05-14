@@ -296,7 +296,8 @@ namespace OpenUtau.Core.CustomRender {
                     { "mod", phone.modulation * 100.0 },
                     { "shft", phone.toneShift },
                     { "phtp", phone.phonemeType },
-                    { "strt", phone.stretchMode }
+                    { "strt", phone.stretchMode },
+                    { "splc", phone.spliceMode }
                 };
                 foreach (var flag in phone.flags) {
                     // flag: Tuple<flagName, int?, abbr>
