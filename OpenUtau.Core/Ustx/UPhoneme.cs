@@ -211,6 +211,8 @@ namespace OpenUtau.Core.Ustx {
             expressions.AddRange(project.expressions.Values);
             expressions.RemoveAll(exp => track.TrackExpressions.Any(te => te.abbr == exp.abbr));
             expressions.AddRange(track.TrackExpressions);
+            // Sort by flag to ensure deterministic output regardless of Dictionary iteration order.
+            expressions.Sort((a, b) => string.Compare(a.flag, b.flag, StringComparison.Ordinal));
             foreach (var descriptor in expressions) {
                 if (descriptor.type == UExpressionType.Numerical) {
                     if (!string.IsNullOrEmpty(descriptor.flag)) {

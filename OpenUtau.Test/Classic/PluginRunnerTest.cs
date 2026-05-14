@@ -132,7 +132,7 @@ PreUtterance=
 Velocity=40
 Intensity=50
 Modulation=60
-Flags=g30B50H0P83
+Flags=B50H0P83g30
 [#0002]
 Length=40
 Lyric=ta
