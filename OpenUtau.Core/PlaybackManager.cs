@@ -340,7 +340,7 @@ namespace OpenUtau.Core {
                         var projectMix = engine.RenderMixdown(DocManager.Inst.MainScheduler, ref renderCancellation, wait: true).Item1;
                         DocManager.Inst.ExecuteCmd(new ProgressBarNotification(0, $"Exporting to {exportPath}."));
                         CheckFileWritable(exportPath);
-                        WaveFileWriter.CreateWaveFile16(exportPath, new ExportAdapter(projectMix).ToMono(1, 0));
+                        WaveFileWriter.CreateWaveFile16(exportPath, new ExportAdapter(projectMix));
                         DocManager.Inst.ExecuteCmd(new ProgressBarNotification(0, $"Exported to {exportPath}."));
                     }
                 } catch (IOException ioe) {

@@ -181,6 +181,7 @@ namespace OpenUtau.Core.Util {
             public Dictionary<string, string> SingerPhonemizers = new Dictionary<string, string>();
             public List<string> RecentPhonemizers = new List<string>();
             public bool PreferPortAudio = false;
+            public bool UseSystemDefaultAudioDevice = true;
             public double PlayPosMarkerMargin = 0.9;
             public int LockStartTime = 0;
             public int PlaybackAutoScroll = 2;
@@ -195,6 +196,7 @@ namespace OpenUtau.Core.Util {
             public bool ShowWaveform = true;
             public bool ShowPhoneme = true;
             public bool ShowExpressions = true;
+            public bool ShowPhonemizerTags = true;
             public bool ShowNoteParams = true;
             public Dictionary<string, string> DefaultResamplers = new Dictionary<string, string>();
             public Dictionary<string, string> DefaultWavtools = new Dictionary<string, string>();

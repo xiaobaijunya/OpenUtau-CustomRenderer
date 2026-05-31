@@ -45,8 +45,6 @@
               <MenuItem Header="{DynamicResource menu.file.exportustto}" Click="OnMenuExportUstTo"/>
               <MenuItem Header="{DynamicResource menu.file.exportmidi}" Click="OnMenuExportMidi"/>
               <MenuItem Header="{DynamicResource menu.file.exportds}" Click="OnMenuExportDsTo"/>
-              <MenuItem Header="{DynamicResource menu.file.exportds.v2}" Click="OnMenuExportDsV2To"/>
-              <MenuItem Header="{DynamicResource menu.file.exportds.v2withoutpitch}" Click="OnMenuExportDsV2WithoutPitchTo"/>
             </MenuItem>
             <MenuItem Header="{DynamicResource menu.file.openexportlocation}" Click="OnMenuOpenProjectLocation"/>
           </MenuItem>
@@ -403,7 +401,7 @@
           </Border>
           <GridSplitter Grid.Row="3" Grid.ColumnSpan="3" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                         Background="{DynamicResource SystemControlBackgroundAltHighBrush}" Focusable="False" Cursor="SizeNorthSouth" IsVisible="{Binding ShowPianoRoll}"/>
-          <Canvas Grid.Row="4" Grid.ColumnSpan="3">
+          <Canvas Grid.Row="4" Grid.ColumnSpan="3" IsVisible="{Binding ShowPianoRoll}">
             <ContentControl Name="PianoRollContainer" Width="{Binding $parent[Canvas].Bounds.Width}" Height="{Binding $parent[Canvas].Bounds.Height}"/>
           </Canvas>
           <TextBlock Grid.Row="5" Grid.ColumnSpan="3" HorizontalAlignment="Stretch" Height="20" Margin="4,4,4,0" Text="{Binding ProgressText}"/>
