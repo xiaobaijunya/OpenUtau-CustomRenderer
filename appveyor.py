@@ -61,6 +61,7 @@ elif sys.platform == 'darwin':
     os.system("rm *.dmg")
     os.system("rm *.xml")
 
+    # Build osx-x64
     os.system("git checkout OpenUtau/OpenUtau.csproj")
     os.system("rm LICENSE.txt")
     os.system(
@@ -74,10 +75,23 @@ elif sys.platform == 'darwin':
     os.system("create-dmg bin/osx-x64/publish/OpenUtau.app")
     os.system("mv *.dmg OpenUtau-osx-x64.dmg")
     os.system("codesign -fvs - OpenUtau-osx-x64.dmg")
-    os.system("git checkout OpenUtau/OpenUtau.csproj")
-    os.system("git checkout LICENSE.txt")
-
     write_appcast("macos", "osx-x64", "OpenUtau-osx-x64.dmg")
+
+    # Build osx-arm64
+    os.system("git checkout OpenUtau/OpenUtau.csproj")
+    os.system("rm LICENSE.txt")
+    os.system(
+        "sed -i '' \"s/0.0.0/%s/g\" OpenUtau/OpenUtau.csproj" % (appcast_ver))
+    os.system("dotnet restore OpenUtau -r osx-arm64")
+    os.system("dotnet msbuild OpenUtau -t:BundleApp -p:Configuration=Release -p:RuntimeIdentifier=osx-arm64 -p:UseAppHost=true -p:OutputPath=../bin/osx-arm64/")
+    os.system(
+        "cp OpenUtau/Assets/OpenUtau.icns bin/osx-arm64/publish/OpenUtau.app/Contents/Resources/")
+    os.system("rm *.dmg")
+    os.system("npm install -g create-dmg")
+    os.system("create-dmg bin/osx-arm64/publish/OpenUtau.app")
+    os.system("mv *.dmg OpenUtau-osx-arm64.dmg")
+    os.system("codesign -fvs - OpenUtau-osx-arm64.dmg")
+    write_appcast("macos", "osx-arm64", "OpenUtau-osx-arm64.dmg")
 
 else:
     os.system("rm *.xml")
