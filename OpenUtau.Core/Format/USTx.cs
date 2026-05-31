@@ -62,7 +62,7 @@ namespace OpenUtau.Core.Format {
             project.RegisterExpression(new UExpressionDescriptor("attack", ATK, 0, 200, 100));
             project.RegisterExpression(new UExpressionDescriptor("decay", DEC, 0, 100, 0));
             project.RegisterExpression(new UExpressionDescriptor("gender", GEN, -100, 100, 0, "g"));
-            project.RegisterExpression(new UExpressionDescriptor("breath", BRE, 0, 100, 50, "B"));
+            project.RegisterExpression(new UExpressionDescriptor("breath", BRE, 0, 100, 50, "B", skipOutputIfDefault: true));
             project.RegisterExpression(new UExpressionDescriptor("breath low (curve)", BREL, -100, 100, 0) { type = UExpressionType.Curve });
             project.RegisterExpression(new UExpressionDescriptor("breath high (curve)", BREH, -100, 100, 0) { type = UExpressionType.Curve });
             project.RegisterExpression(new UExpressionDescriptor("gender (curve)", GENC, -200, 200, 0) { type = UExpressionType.Curve });

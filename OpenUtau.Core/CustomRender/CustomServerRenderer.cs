@@ -88,7 +88,6 @@ namespace OpenUtau.Core.CustomRender {
             try {
                 string progressInfo =
                     $"Track {trackNo + 1}: CustomServerRenderer \"{string.Join(" ", phrase.phones.Select(p => p.phoneme))}\"";
-                progress.Complete(0, progressInfo);
 
                 var wavPath = Path.Join(PathManager.Inst.CachePath, $"custom-{phrase.hash:x16}.wav");
                 phrase.AddCacheFile(wavPath);
