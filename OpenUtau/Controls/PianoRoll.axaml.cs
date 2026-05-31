@@ -910,7 +910,7 @@ namespace OpenUtau.App.Controls {
                 Cursor = ViewConstants.cursorEraser;
                 return;
             }
-            if ((ViewModel.NotesViewModel.DrawPitchTool || ViewModel.NotesViewModel.DrawLinePitchTool || ViewModel.NotesViewModel.OverwritePitchTool || ViewModel.NotesViewModel.OverwriteLinePitchTool || ViewModel.NotesViewModel.EraserTool) && args.KeyModifiers != cmdKey) {
+            if ((notesVm!.DrawPitchTool || notesVm.DrawLinePitchTool || notesVm.OverwritePitchTool || notesVm.OverwriteLinePitchTool || notesVm.EraserTool) && args.KeyModifiers != cmdKey) {
                 Cursor = null;
                 return;
             }

@@ -33,10 +33,8 @@ jobs:
           - { name: win-x64, rid: win-x64, arch: x64, os: win, runs-on: windows-latest }
           - { name: win-x86, rid: win-x86, arch: x86, os: win, runs-on: windows-latest }
           - { name: win-arm64, rid: win-arm64, arch: arm64, os: win, runs-on: windows-latest }
-          - { name: osx-x64, rid: osx-x64, arch: x64, os: osx, runs-on: macos-15-intel }
           - { name: osx-arm64, rid: osx-arm64, arch: arm64, os: osx, runs-on: macos-latest }
           - { name: linux-x64, rid: linux-x64, arch: x64, os: linux, runs-on: ubuntu-latest, linuxarch: x86_64}
-          - { name: linux-arm64, rid: linux-arm64, arch: arm64, os: linux, runs-on: ubuntu-latest, linuxarch: aarch64}
 
     steps:
       # Setup
@@ -88,6 +86,15 @@ jobs:
       - name: Set executable permission
         run: chmod +x bin/${{ matrix.arch.name }}/OpenUtau
         if: ${{ matrix.arch.os == 'linux' }}
+
+      # Download default voicebank
+      - name: Download default voicebank (XiaoShuang)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bin/${{ matrix.arch.name }}/Singers
+          curl -L https://github.com/xiaobaijunya/OpenUtau-CustomRenderer/releases/download/0.0.0/XiaoShuang_zhcvv.zip -o XiaoShuang_zhcvv.zip
+          Expand-Archive -Path XiaoShuang_zhcvv.zip -DestinationPath bin/${{ matrix.arch.name }}/Singers/ -Force
+          Remove-Item XiaoShuang_zhcvv.zip
 
       # Upload Artifacts (non-release only, GitHub will zip the directory once)
       - uses: actions/upload-artifact@v4
