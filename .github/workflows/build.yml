@@ -25,6 +25,8 @@ env:
 jobs:
   build:
     runs-on: ${{ matrix.arch.runs-on }}
+    permissions:
+      contents: write
 
     strategy:
       fail-fast: false
