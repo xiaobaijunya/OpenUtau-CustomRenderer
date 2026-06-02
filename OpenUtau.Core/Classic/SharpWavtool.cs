@@ -109,9 +109,23 @@ namespace OpenUtau.Classic {
 
             var phraseSamples = new float[0];
             foreach (var segment in segments) {
-                Array.Resize(ref phraseSamples, segment.posSamples + segment.correction + segment.samples.Length - segment.skipSamples);
-                for (int i = Math.Max(0, -segment.skipSamples); i < segment.samples.Length - segment.skipSamples; i++) {
-                    phraseSamples[segment.posSamples + segment.correction + i] += segment.samples[segment.skipSamples + i];
+                if (segment.samples == null || segment.samples.Length == 0) {
+                    continue;
+                }
+                long newSizeLong = (long)segment.posSamples + segment.correction + segment.samples.Length - segment.skipSamples;
+                int newSize = (int)Math.Min(Math.Max(newSizeLong, phraseSamples.Length), int.MaxValue);
+                if (newSize > phraseSamples.Length) {
+                    Array.Resize(ref phraseSamples, newSize);
+                }
+                int startI = Math.Max(0, -segment.skipSamples);
+                int endI = segment.samples.Length - segment.skipSamples;
+                for (int i = startI; i < endI; i++) {
+                    int phraseIdx = segment.posSamples + segment.correction + i;
+                    int sampleIdx = segment.skipSamples + i;
+                    if (phraseIdx >= 0 && phraseIdx < phraseSamples.Length &&
+                        sampleIdx >= 0 && sampleIdx < segment.samples.Length) {
+                        phraseSamples[phraseIdx] += segment.samples[sampleIdx];
+                    }
                 }
             }
             return phraseSamples;
