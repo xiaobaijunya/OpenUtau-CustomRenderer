@@ -128,6 +128,8 @@ namespace OpenUtau.App.Controls {
                 new DashToPlus(),
                 new DashToPlusTilda(),
                 new InsertSlur(),
+                new ShiftLyricBackward(),
+                new ShiftLyricForward(),
             }.Select(edit => new MenuItemViewModel() {
                 Header = ThemeManager.GetString(edit.Name),
                 Command = noteBatchEditCommand,

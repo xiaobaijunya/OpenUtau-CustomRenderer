@@ -338,6 +338,8 @@ Syntax: prefix,suffix</system:String>-->
   <system:String x:Key="pianoroll.menu.lyrics.edit">编辑歌词</system:String>
   <system:String x:Key="pianoroll.menu.lyrics.hiraganatoromaji">平假名转罗马音</system:String>
   <system:String x:Key="pianoroll.menu.lyrics.insertslur">插入转音歌词</system:String>
+  <system:String x:Key="pianoroll.menu.lyrics.shiftbackward">歌词后移（当前→"+"，后续歌词后移一位）</system:String>
+  <system:String x:Key="pianoroll.menu.lyrics.shiftforward">歌词前移（删除当前歌词，后续歌词前移一位）</system:String>
   <system:String x:Key="pianoroll.menu.lyrics.javcvtocv">日语 VCV 转 CV</system:String>
   <system:String x:Key="pianoroll.menu.lyrics.movesuffixtovoicecolor">将音符后缀解析为音色</system:String>
   <system:String x:Key="pianoroll.menu.lyrics.removelettersuffix">去除字母后缀</system:String>

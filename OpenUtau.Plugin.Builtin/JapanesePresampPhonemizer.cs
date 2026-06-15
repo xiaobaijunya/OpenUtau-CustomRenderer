@@ -79,6 +79,24 @@ namespace OpenUtau.Plugin.Builtin {
             Log.Debug($"Prev: {prevtest}, Current: {currentLyric}, Next: {nexttest}");
             */
 
+            // Handle R (rest/breath) with phtp=2
+            if (currentAlias == "R" && prevNeighbour != null) {
+                var prevLyric = ParseLyricFromNote(prevNeighbour.Value);
+                string prevAlias = ParseAliasFromLyric(prevLyric);
+                if (TryGetPresampPhoneme(prevAlias, out PresampPhoneme prevPhoneme) && prevPhoneme.HasVowel) {
+                    var vR = $"{prevPhoneme.Vowel}{vcpad}{currentLyric}";
+                    if (checkOtoUntilHit(new List<string> { vR, currentLyric }, note, out var oto)) {
+                        return MakeSimpleResult(oto.Alias, 2);
+                    }
+                }
+                preCFlag = true;
+                var tests = new List<string> { initial, currentLyric };
+                if (checkOtoUntilHit(tests, note, out var otoInit)) {
+                    currentLyric = otoInit.Alias;
+                }
+                goto AfterConversion;
+            }
+
             // Convert 1st phoneme
             if (!string.IsNullOrEmpty(note.phoneticHint)) { // not convert
                 var tests = new List<string> { currentLyric };
@@ -186,7 +204,9 @@ namespace OpenUtau.Plugin.Builtin {
                     }
                 }
             }
-            result.Add(new Phoneme() { phoneme = currentLyric, index = 0 });
+        AfterConversion:
+            int mainPhtp = currentAlias == "R" ? 2 : 0;
+            result.Add(MakePhoneme(currentLyric, 0, mainPhtp));
 
             // Insert "- C"
             if (string.IsNullOrEmpty(note.phoneticHint)
@@ -207,17 +227,20 @@ namespace OpenUtau.Plugin.Builtin {
                         cLength = Math.Min(note.position - prev.Value.position - prev.Value.duration, cLength);
                     }
 
+                    var prependExpr = new List<PhonemeExpression>() {
+                        new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 2 }
+                    };
                     result.Insert(0, new Phoneme() {
                         phoneme = cOto.Alias,
                         position = Convert.ToInt32(- cLength),
                         index = 2,
-                        expressions = new List<PhonemeExpression>()
+                        expressions = prependExpr
                     });
                     if (color != null) {
-                        result[0].expressions.Add(new PhonemeExpression() { abbr = Core.Format.Ustx.CLR, value = (int)color });
+                        prependExpr.Add(new PhonemeExpression() { abbr = Core.Format.Ustx.CLR, value = (int)color });
                     }
                     if (presamp.CFlags == "p0") {
-                        result.First(p => p.index == 2).expressions.Add(new PhonemeExpression() { abbr = Core.Format.Ustx.NORM, value = 0 });
+                        prependExpr.Add(new PhonemeExpression() { abbr = Core.Format.Ustx.NORM, value = 0 });
                     }
                 }
             }
@@ -323,14 +346,17 @@ namespace OpenUtau.Plugin.Builtin {
                     // Minimam is 30 tick, maximum is half of note
                     vcLength = Convert.ToInt32(Math.Min(totalDuration / 2, Math.Max(30, vcLength * (nextAttr.consonantStretchRatio ?? 1))));
 
+                    var vcExpr = new List<PhonemeExpression>() {
+                        new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 2 }
+                    };
                     result.Add(new Phoneme() {
                         phoneme = vcPhoneme,
                         position = totalDuration - vcLength,
                         index = 1,
-                        expressions = new List<PhonemeExpression>()
+                        expressions = vcExpr
                     });
                     if (vcColorIndex != null) {
-                        result.First(p => p.index == 1).expressions.Add(new PhonemeExpression() { abbr = Core.Format.Ustx.CLR, value = (int)vcColorIndex });
+                        vcExpr.Add(new PhonemeExpression() { abbr = Core.Format.Ustx.CLR, value = (int)vcColorIndex });
                     }
                 }
             }
@@ -430,6 +456,24 @@ namespace OpenUtau.Plugin.Builtin {
                 }
             }
             return false;
+        }
+
+        private Phoneme MakePhoneme(string phoneme, int position, int phtpValue) {
+            return new Phoneme {
+                phoneme = phoneme,
+                position = position,
+                expressions = new List<PhonemeExpression>() {
+                    new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = phtpValue }
+                }
+            };
+        }
+
+        private Result MakeSimpleResult(string phoneme, int phtpValue) {
+            return new Result() {
+                phonemes = new Phoneme[] {
+                    MakePhoneme(phoneme, 0, phtpValue)
+                }
+            };
         }
     }
 }
