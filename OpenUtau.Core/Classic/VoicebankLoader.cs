@@ -324,7 +324,7 @@ namespace OpenUtau.Classic {
                 using (var stream = File.OpenRead(filePath)) {
                     var otoSet = ParseOtoSet(stream, filePath, encoding);
                     if (!IsTest) {
-                        CheckWavExist(otoSet);
+                        CheckWavExist(otoSet, encoding);
                     }
                     AddAliasForMissingFiles(otoSet);
                     if (useFilenameAsAlias == true) {
@@ -405,13 +405,26 @@ namespace OpenUtau.Classic {
             }
         }
 
-        static void CheckWavExist(OtoSet otoSet) {
+        static void CheckWavExist(OtoSet otoSet, Encoding encoding) {
             var wavGroups = otoSet.Otos.Where(oto => oto.IsValid).GroupBy(oto => oto.Wav);
             var dir = Path.GetDirectoryName(otoSet.File);
             var NFDFiles = Directory.GetFiles(dir, "*.wav")
                 .Select(file => Path.GetFileName(file))
                 .Where(file => !file.IsNormalized())
                 .ToDictionary(file => file.Normalize());
+            // Collect all actual WAV filenames on disk for encoding fallback.
+            var actualWavs = Directory.GetFiles(dir, "*.wav")
+                .Select(file => Path.GetFileName(file))
+                .ToArray();
+
+            // Common ANSI codepages that might have been used to create mojibake filenames.
+            var fallbackEncodings = new[] {
+                Encoding.GetEncoding("gb2312"),
+                Encoding.GetEncoding("big5"),
+                Encoding.GetEncoding("ks_c_5601-1987"),
+                Encoding.GetEncoding("shift_jis"),
+                Encoding.UTF8,
+            };
 
             foreach (var group in wavGroups) {
                 string path = Path.Combine(dir, group.Key);
@@ -420,7 +433,44 @@ namespace OpenUtau.Classic {
                         foreach (var oto in group) {
                             oto.Wav = NFDFile;
                         }
-                    } else {
+                        continue;
+                    }
+                    // Encoding fallback: the WAV filename from oto.ini is correct Unicode,
+                    // but the actual file on disk may have a mojibake name because the
+                    // Shift-JIS bytes were interpreted using a different ANSI codepage.
+                    // Convert the expected name to Shift-JIS bytes, then try to find a
+                    // file whose name matches those bytes when encoded in various codepages.
+                    bool found = false;
+                    byte[]? jisBytes = null;
+                    try {
+                        jisBytes = Encoding.GetEncoding("shift_jis").GetBytes(group.Key);
+                    } catch {
+                    }
+                    if (jisBytes != null && jisBytes.Length > 0) {
+                        foreach (var actualFile in actualWavs) {
+                            if (actualFile == group.Key) continue;
+                            foreach (var testEnc in fallbackEncodings) {
+                                if (testEnc.CodePage == encoding.CodePage) continue;
+                                byte[] actualBytes;
+                                try {
+                                    actualBytes = testEnc.GetBytes(actualFile);
+                                } catch {
+                                    continue;
+                                }
+                                if (actualBytes.Length == jisBytes.Length &&
+                                    actualBytes.AsSpan().SequenceEqual(jisBytes)) {
+                                    Log.Information($"Found WAV via {testEnc.WebName} encoding fallback: {actualFile}");
+                                    foreach (var oto in group) {
+                                        oto.Wav = actualFile;
+                                    }
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (found) break;
+                        }
+                    }
+                    if (!found) {
                         Log.Error($"Sound file missing. {path}");
                         foreach (Oto oto in group) {
                             if (string.IsNullOrEmpty(oto.Error)) {
