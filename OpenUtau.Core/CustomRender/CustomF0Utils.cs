@@ -21,6 +21,7 @@ namespace OpenUtau.Core.CustomRender {
             { "tenc", 0 },
             { "voic", 100 },
             { "lowc", 0 },
+            { "hcmp", 0 },
             { "brel", 0 },
             { "breh", 0 },
         };
@@ -76,6 +77,18 @@ namespace OpenUtau.Core.CustomRender {
                     i => {
                         int ticks = GetTicks(phrase, i, frameMs);
                         return phrase.lowcut![ClampIndex(ticks, phrase.lowcut.Length)];
+                    }),
+                ("warm",
+                    () => phrase.warmth != null && phrase.warmth.Length > 0,
+                    i => {
+                        int ticks = GetTicks(phrase, i, frameMs);
+                        return phrase.warmth![ClampIndex(ticks, phrase.warmth.Length)];
+                    }),
+                ("hcmp",
+                    () => phrase.hcmp != null && phrase.hcmp.Length > 0,
+                    i => {
+                        int ticks = GetTicks(phrase, i, frameMs);
+                        return phrase.hcmp![ClampIndex(ticks, phrase.hcmp.Length)];
                     }),
                 ("brel",
                     () => phrase.breathLow != null && phrase.breathLow.Length > 0,

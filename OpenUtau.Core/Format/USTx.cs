@@ -43,6 +43,8 @@ namespace OpenUtau.Core.Format {
         public const string STRT = "strt";
         public const string SPLC = "splc";
         public const string STMS = "stms";
+        public const string WARM = "warm";
+        public const string HCMP = "hcmp";
 
         public static readonly string[] required = { DYN, PITD, CLR, ENG, VEL, VOL, ATK, DEC };
 
@@ -73,6 +75,8 @@ namespace OpenUtau.Core.Format {
             project.RegisterExpression(new UExpressionDescriptor("voicing (curve)", VOIC, 0, 100, 100) { type = UExpressionType.Curve });
             project.RegisterExpression(new UExpressionDescriptor("growl (curve)", GWL, 0, 100, 0) { type = UExpressionType.Curve });
             project.RegisterExpression(new UExpressionDescriptor("lowcut (curve)", LOWC, 0, 100, 0) { type = UExpressionType.Curve });
+            project.RegisterExpression(new UExpressionDescriptor("warmth (curve)", WARM, -100, 100, 0) { type = UExpressionType.Curve });
+            project.RegisterExpression(new UExpressionDescriptor("hard compression (curve)", HCMP, 0, 100, 0) { type = UExpressionType.Curve });
             project.RegisterExpression(new UExpressionDescriptor("volume normalize", PHTP, false, new string[] { "none", "backward", "forward" }));
             project.RegisterExpression(new UExpressionDescriptor("stretch mode", STRT, false, new string[] { "normal", "loop" }));
             project.RegisterExpression(new UExpressionDescriptor("splice mode", SPLC, false, new string[] { "old", "mel" }) { defaultValue = 1 });
