@@ -135,6 +135,52 @@ jobs:
           zip -r ../../OpenUtau-${{ matrix.arch.name }}.zip *
         if: ${{ inputs.release && matrix.arch.os != 'win' }}
 
+      # Generate release changelog
+      - name: Generate release changelog
+        shell: pwsh
+        run: |
+          $currentVersion = "${{ inputs.version }}"
+          $repo = "stakira/OpenUtau"
+
+          # Find previous version tag
+          $tags = git tag --list | Where-Object { $_ -match '^\d+\.\d+\.\d+$' } | Sort-Object -Descending
+          $prevTag = $null
+          foreach ($tag in $tags) {
+            if ([version]$tag -lt [version]$currentVersion) {
+              $prevTag = $tag
+              break
+            }
+          }
+
+          $bodyLines = [System.Collections.ArrayList]::new()
+
+          if ($prevTag) {
+            $log = git log "$($prevTag)..HEAD" --oneline --no-merges
+            Write-Host "Found previous tag: $prevTag, commits count: $($log.Count)"
+            [void]$bodyLines.Add("## 更新内容")
+            [void]$bodyLines.Add("基于上个版本 \`$prevTag\` 的更新：")
+            [void]$bodyLines.Add("")
+            $i = 1
+            foreach ($line in $log) {
+              $parts = $line.Split(' ', 2)
+              $hash = $parts[0]
+              $msg = $parts[1]
+              [void]$bodyLines.Add("$i. [$msg](https://github.com/$repo/commit/$hash)")
+              $i++
+            }
+            [void]$bodyLines.Add("")
+          }
+
+          [void]$bodyLines.Add("See [Getting Started](https://github.com/$repo/wiki/Getting-Started) for how to use.")
+          [void]$bodyLines.Add("")
+          [void]$bodyLines.Add("If you encountered issues, see [FAQ](https://github.com/$repo/wiki/FAQ)")
+          [void]$bodyLines.Add("")
+          [void]$bodyLines.Add("## macOS says `"This app is damaged`"")
+          [void]$bodyLines.Add("Open a terminal and run `xattr -rc /Applications/OpenUtau.app`. Try opening OpenUtau again.")
+
+          $bodyLines -join "`n" | Out-File -FilePath release_body.md -Encoding utf8
+          Write-Host "Release body written to release_body.md"
+
       # Release
       - name: Release
         uses: softprops/action-gh-release@v2
@@ -143,14 +189,8 @@ jobs:
           name: ${{ env.release-name }}
           prerelease: ${{ inputs.beta }}
           draft: ${{ inputs.draft }}
+          body_path: release_body.md
           files: |
             appcast.${{ matrix.arch.name }}*.xml
             OpenUtau-${{ matrix.arch.name }}.zip
-          body: |
-            See [Getting Started](https://github.com/stakira/OpenUtau/wiki/Getting-Started) for how to use.
-
-            If you encountered issues, see [FAQ](https://github.com/stakira/OpenUtau/wiki/FAQ)
-
-            ## macOS says "This app is damaged"
-            Open a terminal and run `xattr -rc /Applications/OpenUtau.app`. Try opening OpenUtau again.
         if: ${{ inputs.release }}
