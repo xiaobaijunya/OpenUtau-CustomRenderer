@@ -18,6 +18,7 @@ using OpenUtau.App.ViewModels;
 using OpenUtau.Classic;
 using OpenUtau.Core;
 using OpenUtau.Core.Analysis;
+using OpenUtau.Core.Editing;
 using OpenUtau.Core.DiffSinger;
 using OpenUtau.Core.Format;
 using OpenUtau.Core.Ustx;
@@ -1274,14 +1275,6 @@ namespace OpenUtau.App.Views {
         }
 
         async Task ApplyPitchFrom(UVoicePart target, UWavePart source) {
-            if (!RmvpeTranscriber.IsInstalled()) {
-                await MessageBox.Show(
-                    this,
-                    ThemeManager.GetString("dialogs.transcribe.rmvpe.notfound"),
-                    ThemeManager.GetString("errors.caption"),
-                    MessageBox.MessageBoxButtons.Ok);
-                return;
-            }
             var project = DocManager.Inst.Project;
             if (!project.expressions.ContainsKey(Ustx.PITD)) {
                 await MessageBox.Show(
@@ -1300,6 +1293,22 @@ namespace OpenUtau.App.Views {
                 return;
             }
 
+            // Show algorithm selection dialog
+            var pitchVm = new ApplyPitchViewModel();
+            if (pitchVm.NoneAvailable) {
+                await MessageBox.Show(
+                    this,
+                    ThemeManager.GetString("dialogs.transcribe.rmvpe.notfound"),
+                    ThemeManager.GetString("errors.caption"),
+                    MessageBox.MessageBoxButtons.Ok);
+                return;
+            }
+            var pitchDialog = new ApplyPitchDialog { DataContext = pitchVm };
+            await pitchDialog.ShowDialog(this);
+            if (!pitchDialog.Confirmed) {
+                return;
+            }
+
             bool cancelled = false;
             using var cts = new CancellationTokenSource();
             MessageBox? msgbox = null;
@@ -1313,69 +1322,15 @@ namespace OpenUtau.App.Views {
                 };
                 msgbox.Closed += closedHandler;
 
-                double srcStartMs = project.timeAxis.TickPosToMsPos(source.position);
-                double srcSkipMs = source.GetSkipMs(project);
-                double targetStartMs = project.timeAxis.TickPosToMsPos(target.position);
-                double targetEndMs = project.timeAxis.TickPosToMsPos(target.End);
-                double targetDurMs = targetEndMs - targetStartMs;
+                bool success = await PitchAudioApplier.ApplyPitchFromWavePartAsync(
+                    project, target, source, pitchVm.SelectedMethod, cts.Token);
 
-                double startSrcFileMs = Math.Max(0, targetStartMs - srcStartMs + srcSkipMs - 1000);
-                double endSrcFileMs = Math.Min(source.fileDurationMs, targetEndMs - srcStartMs + srcSkipMs + 1000);
-
-                if (endSrcFileMs <= startSrcFileMs) {
-                    await MessageBox.Show(
+                if (!cancelled && !success) {
+                    await Dispatcher.UIThread.InvokeAsync(() => MessageBox.Show(
                         this,
-                        ThemeManager.GetString("context.part.nopitchregion"),
+                        ThemeManager.GetString("context.part.nopitchdetected"),
                         ThemeManager.GetString("errors.caption"),
-                        MessageBox.MessageBoxButtons.Ok);
-                    return;
-                }
-                endSrcFileMs = Math.Max(0, endSrcFileMs);
-
-                RmvpeResult? srcResult = await Task.Run(() => {
-                    using var rmvpe = new RmvpeTranscriber();
-                    using (cts.Token.Register(() => rmvpe.Interrupt())) {
-                        if (cts.Token.IsCancellationRequested) {
-                            return null;
-                        }
-                        return rmvpe.Infer(source, startSrcFileMs, endSrcFileMs);
-                    }
-                });
-
-                if (srcResult != null && !cancelled) {
-                    var frameMs = srcResult.TimeStepSeconds * 1000.0;
-                    int targetFrames = (int)Math.Ceiling(targetDurMs / frameMs) + 1;
-                    var targetMidi = new float[targetFrames];
-
-                    for (int i = 0; i < targetFrames; i++) {
-                        double currentTargetMs = i * frameMs;
-                        double absMs = targetStartMs + currentTargetMs;
-                        double srcFileMs = absMs - srcStartMs + srcSkipMs;
-
-                        int srcIdx = (int)Math.Round((srcFileMs - startSrcFileMs) / frameMs);
-                        if (srcIdx >= 0 && srcIdx < srcResult.MidiPitch.Length) {
-                            targetMidi[i] = srcResult.MidiPitch[srcIdx];
-                        } else {
-                            targetMidi[i] = float.NaN;
-                        }
-                    }
-
-                    if (targetMidi.All(float.IsNaN)) {
-                        await Dispatcher.UIThread.InvokeAsync(() => MessageBox.Show(
-                            this,
-                            ThemeManager.GetString("context.part.nopitchdetected"),
-                            ThemeManager.GetString("errors.caption"),
-                            MessageBox.MessageBoxButtons.Ok));
-                    } else {
-                        var targetResult = new RmvpeResult {
-                            TimeStepSeconds = srcResult.TimeStepSeconds,
-                            MidiPitch = targetMidi
-                        };
-
-                        DocManager.Inst.StartUndoGroup("context.part.applypitch");
-                        targetResult.ApplyToPart(project, target);
-                        DocManager.Inst.EndUndoGroup();
-                    }
+                        MessageBox.MessageBoxButtons.Ok));
                 }
             } catch (Exception e) {
                 DocManager.Inst.ExecuteCmd(new ErrorMessageNotification(e));

@@ -149,6 +149,10 @@ Do you want to continue by splitting at the nearest position after current playh
   <system:String x:Key="dialogs.transcribe.game.batchduration">Max Batch Duration (s)</system:String>
   <system:String x:Key="dialogs.transcribe.longchunk.message">One or more audio segments are very long and may consume large amount of memory when transcribing. This usually happens when the audio contains accompaniment. Still proceed?</system:String>
 
+  <system:String x:Key="dialogs.applypitch.caption">Apply Pitch</system:String>
+  <system:String x:Key="dialogs.applypitch.algorithm">Pitch Extraction Method</system:String>
+  <system:String x:Key="dialogs.applypitch.description">Select the algorithm used to extract pitch from audio. Different algorithms may suit different types of audio. Try switching if the result is not satisfactory.</system:String>
+
   <system:String x:Key="errors.caption">Error</system:String>
   <system:String x:Key="errors.details">Error Details</system:String>
   <system:String x:Key="errors.diffsinger.downloadvocoder">Error loading vocoder "{0}". Please download vocoder from {1}</system:String>

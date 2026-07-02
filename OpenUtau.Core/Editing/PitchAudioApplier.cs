@@ -1,14 +1,28 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using NWaves.Signals;
 using OpenUtau.Core.Analysis;
+using OpenUtau.Core.Analysis.Crepe;
 using OpenUtau.Core.Format;
+using OpenUtau.Core.Render;
 using OpenUtau.Core.Ustx;
+using OpenUtau.Core.Util;
 using Serilog;
 
 namespace OpenUtau.Core.Editing;
+
+public enum PitchExtractionMethod {
+    Rmvpe,
+    Crepe,
+    WorldDio,
+    WorldHarvest,
+    WorldPyin,
+}
 
 /// <summary>
 /// Standalone utility for extracting pitch from audio and applying it to voice parts,
@@ -16,6 +30,172 @@ namespace OpenUtau.Core.Editing;
 /// </summary>
 public static class PitchAudioApplier
 {
+    static readonly string pitchCacheDir = Path.Combine(PathManager.Inst.CachePath, "pitch");
+
+    /// <summary>
+    /// Clear all cached pitch extraction files.
+    /// </summary>
+    public static void ClearPitchCache() {
+        try {
+            if (Directory.Exists(pitchCacheDir)) {
+                Directory.Delete(pitchCacheDir, true);
+            }
+        } catch (Exception ex) {
+            Log.Error(ex, "PitchAudioApplier: failed to clear pitch cache.");
+        }
+    }
+
+    /// <summary>
+    /// Get the cache file path for a given wave part and method.
+    /// Uses a hash of the audio file path for the filename.
+    /// </summary>
+    static string GetCacheFilePath(UWavePart wavePart, PitchExtractionMethod method) {
+        var pathHash = ComputePathHash(wavePart.FilePath);
+        var fileInfo = new FileInfo(wavePart.FilePath);
+        long lastWrite = fileInfo.Exists ? fileInfo.LastWriteTimeUtc.Ticks : 0;
+        var fileName = $"{pathHash}_{method}.pitchcache";
+        return Path.Combine(pitchCacheDir, fileName);
+    }
+
+    /// <summary>
+    /// Compute a short hash from a file path string using MD5.
+    /// </summary>
+    static string ComputePathHash(string filePath) {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(
+            string.IsNullOrEmpty(filePath) ? "unknown" : filePath.ToLowerInvariant());
+        var hash = MD5.HashData(bytes);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Try to load a cached pitch result from disk.
+    /// Returns null if cache doesn't exist or is invalid.
+    /// </summary>
+    static RmvpeResult? LoadCachedPitch(string cachePath, UWavePart wavePart) {
+        if (!File.Exists(cachePath)) {
+            return null;
+        }
+        try {
+            var fileInfo = new FileInfo(wavePart.FilePath);
+            long currentLastWrite = fileInfo.Exists ? fileInfo.LastWriteTimeUtc.Ticks : 0;
+
+            using var stream = new FileStream(cachePath, FileMode.Open, FileAccess.Read);
+            using var reader = new BinaryReader(stream);
+
+            long cachedLastWrite = reader.ReadInt64();
+            if (cachedLastWrite != currentLastWrite) {
+                // Audio file has been modified, cache is stale
+                return null;
+            }
+
+            int frameCount = reader.ReadInt32();
+            double timeStepSeconds = reader.ReadDouble();
+            var midiPitch = new float[frameCount];
+            for (int i = 0; i < frameCount; i++) {
+                midiPitch[i] = reader.ReadSingle();
+            }
+
+            return new RmvpeResult {
+                TimeStepSeconds = timeStepSeconds,
+                MidiPitch = midiPitch,
+            };
+        } catch (Exception ex) {
+            Log.Warning(ex, "PitchAudioApplier: failed to load cached pitch, will re-extract.");
+            try { File.Delete(cachePath); } catch { }
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Save a pitch result to disk cache.
+    /// </summary>
+    static void SaveCachedPitch(string cachePath, UWavePart wavePart, RmvpeResult result) {
+        try {
+            var fileInfo = new FileInfo(wavePart.FilePath);
+            long lastWrite = fileInfo.Exists ? fileInfo.LastWriteTimeUtc.Ticks : 0;
+
+            Directory.CreateDirectory(pitchCacheDir);
+            using var stream = new FileStream(cachePath, FileMode.Create, FileAccess.Write);
+            using var writer = new BinaryWriter(stream);
+
+            writer.Write(lastWrite);
+            writer.Write(result.MidiPitch.Length);
+            writer.Write(result.TimeStepSeconds);
+            foreach (var val in result.MidiPitch) {
+                writer.Write(val);
+            }
+        } catch (Exception ex) {
+            Log.Warning(ex, "PitchAudioApplier: failed to save pitch cache.");
+        }
+    }
+
+    /// <summary>
+    /// Get or extract pitch for the full source wave part (disk-cached), then slice
+    /// the portion needed for the target.
+    /// </summary>
+    static async Task<RmvpeResult?> GetPitchCached(
+        UProject project, UWavePart sourcePart, double startSrcFileMs, double endSrcFileMs,
+        PitchExtractionMethod method, CancellationToken cancellationToken)
+    {
+        var cachePath = GetCacheFilePath(sourcePart, method);
+
+        // Try loading from disk cache
+        var fullResult = LoadCachedPitch(cachePath, sourcePart);
+        if (fullResult == null)
+        {
+            fullResult = await ExtractFullPitchAsync(sourcePart, method, cancellationToken);
+            if (fullResult == null)
+            {
+                return null;
+            }
+            // Save to disk cache (fire and forget)
+            SaveCachedPitch(cachePath, sourcePart, fullResult);
+        }
+
+        // Slice the portion we need
+        double srcSkipMs = sourcePart.GetSkipMs(project);
+        double effectiveStart = startSrcFileMs - srcSkipMs;
+
+        int startFrame = Math.Max(0, (int)(effectiveStart / (fullResult.TimeStepSeconds * 1000.0)));
+        int endFrame = Math.Min(fullResult.MidiPitch.Length,
+            (int)Math.Ceiling((endSrcFileMs - srcSkipMs) / (fullResult.TimeStepSeconds * 1000.0)));
+        int sliceLen = endFrame - startFrame;
+
+        if (sliceLen <= 0)
+        {
+            return null;
+        }
+
+        var sliced = new float[sliceLen];
+        Array.Copy(fullResult.MidiPitch, startFrame, sliced, 0, sliceLen);
+
+        return new RmvpeResult
+        {
+            TimeStepSeconds = fullResult.TimeStepSeconds,
+            MidiPitch = sliced,
+        };
+    }
+
+    /// <summary>
+    /// Extract pitch for the entire wave part using the specified method (no caching).
+    /// </summary>
+    static async Task<RmvpeResult?> ExtractFullPitchAsync(
+        UWavePart sourcePart, PitchExtractionMethod method,
+        CancellationToken cancellationToken)
+    {
+        switch (method)
+        {
+            case PitchExtractionMethod.Crepe:
+                return await Task.Run(() => ExtractPitchCrepeFull(sourcePart), cancellationToken);
+            case PitchExtractionMethod.WorldDio:
+            case PitchExtractionMethod.WorldHarvest:
+            case PitchExtractionMethod.WorldPyin:
+                return await Task.Run(() => ExtractPitchWorldFull(sourcePart, method), cancellationToken);
+            default:
+                return await ExtractPitchRmvpe(sourcePart, 0, 0, cancellationToken);
+        }
+    }
+
     /// <summary>
     /// Extract pitch from a wave part and apply it as PITD (pitch deviation) curve
     /// to the target voice part.
@@ -29,6 +209,27 @@ public static class PitchAudioApplier
         UProject project,
         UVoicePart targetPart,
         UWavePart sourcePart,
+        CancellationToken cancellationToken = default)
+    {
+        return await ApplyPitchFromWavePartAsync(project, targetPart, sourcePart,
+            PitchExtractionMethod.Rmvpe, cancellationToken);
+    }
+
+    /// <summary>
+    /// Extract pitch from a wave part using the specified method and apply it as PITD curve
+    /// to the target voice part.
+    /// </summary>
+    /// <param name="project">The current project.</param>
+    /// <param name="targetPart">The target voice part to apply pitch to.</param>
+    /// <param name="sourcePart">The source wave part to extract pitch from.</param>
+    /// <param name="method">The pitch extraction algorithm to use.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True if pitch was successfully applied; false if no pitch detected or cancelled.</returns>
+    public static async Task<bool> ApplyPitchFromWavePartAsync(
+        UProject project,
+        UVoicePart targetPart,
+        UWavePart sourcePart,
+        PitchExtractionMethod method,
         CancellationToken cancellationToken = default)
     {
         if (targetPart.notes.Count == 0)
@@ -53,18 +254,8 @@ public static class PitchAudioApplier
         }
         endSrcFileMs = Math.Max(0, endSrcFileMs);
 
-        RmvpeResult? srcResult;
-        using (var rmvpe = new RmvpeTranscriber())
-        {
-            using (cancellationToken.Register(() => rmvpe.Interrupt()))
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    return false;
-                }
-                srcResult = await Task.Run(() => rmvpe.Infer(sourcePart, startSrcFileMs, endSrcFileMs), cancellationToken);
-            }
-        }
+        RmvpeResult? srcResult = await GetPitchCached(
+            project, sourcePart, startSrcFileMs, endSrcFileMs, method, cancellationToken);
 
         if (srcResult == null || cancellationToken.IsCancellationRequested)
         {
@@ -110,6 +301,149 @@ public static class PitchAudioApplier
 
         Log.Information("PitchAudioApplier: successfully applied pitch from {SourceName} to target part.", sourcePart.DisplayName);
         return true;
+    }
+
+    /// <summary>
+    /// Extract pitch using RMVPE (deep learning model).
+    /// </summary>
+    static async Task<RmvpeResult?> ExtractPitchRmvpe(
+        UWavePart sourcePart, double startSrcFileMs, double endSrcFileMs,
+        CancellationToken cancellationToken)
+    {
+        using var rmvpe = new RmvpeTranscriber();
+        using (cancellationToken.Register(() => rmvpe.Interrupt()))
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+            return await Task.Run(() => rmvpe.Infer(sourcePart, startSrcFileMs, endSrcFileMs), cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Extract pitch from the entire wave part using CREPE (deep learning model, embedded).
+    /// </summary>
+    static RmvpeResult? ExtractPitchCrepeFull(UWavePart wavePart)
+    {
+        const double frameMs = 10.0;
+
+        int totalSamples = wavePart.Samples.Length / wavePart.channels;
+        var mono = ToMono(wavePart.Samples, 0, totalSamples, wavePart.channels);
+        var signal = new DiscreteSignal(wavePart.sampleRate, mono);
+
+        using var crepe = new Crepe();
+        var f0 = crepe.ComputeF0(signal, frameMs);
+        if (f0 == null || f0.Length == 0)
+        {
+            return null;
+        }
+
+        var midiPitch = new float[f0.Length];
+        for (int i = 0; i < f0.Length; i++)
+        {
+            midiPitch[i] = f0[i] > 0
+                ? (float)(69.0 + 12.0 * Math.Log2(f0[i] / 440.0))
+                : float.NaN;
+        }
+
+        return new RmvpeResult
+        {
+            TimeStepSeconds = frameMs / 1000.0,
+            MidiPitch = midiPitch,
+        };
+    }
+
+    /// <summary>
+    /// Extract pitch from the entire wave part using WORLD methods (DIO, Harvest, PYIN).
+    /// </summary>
+    static RmvpeResult? ExtractPitchWorldFull(UWavePart wavePart, PitchExtractionMethod method)
+    {
+        const double frameMs = 5.0;
+        const int targetSampleRate = 44100;
+
+        int totalSamples = wavePart.Samples.Length / wavePart.channels;
+        var mono = ToMono(wavePart.Samples, 0, totalSamples, wavePart.channels);
+        if (wavePart.sampleRate != targetSampleRate)
+        {
+            mono = Resample(mono, wavePart.sampleRate, targetSampleRate);
+        }
+
+        int f0Method = method switch
+        {
+            PitchExtractionMethod.WorldHarvest => 1,
+            PitchExtractionMethod.WorldPyin => 2,
+            _ => 0,
+        };
+
+        var f0 = Worldline.F0(mono, targetSampleRate, frameMs, f0Method);
+        if (f0 == null || f0.Length == 0)
+        {
+            return null;
+        }
+
+        var midiPitch = new float[f0.Length];
+        for (int i = 0; i < f0.Length; i++)
+        {
+            midiPitch[i] = f0[i] > 0
+                ? (float)(69.0 + 12.0 * Math.Log2(f0[i] / 440.0))
+                : float.NaN;
+        }
+
+        return new RmvpeResult
+        {
+            TimeStepSeconds = frameMs / 1000.0,
+            MidiPitch = midiPitch,
+        };
+    }
+
+    static float[] ToMono(float[] samples, int startSample, int endSample, int channels)
+    {
+        int length = endSample - startSample;
+        var mono = new float[length];
+        if (channels == 1)
+        {
+            Array.Copy(samples, startSample, mono, 0, length);
+        }
+        else
+        {
+            for (int i = 0; i < length; i++)
+            {
+                float sum = 0;
+                for (int ch = 0; ch < channels; ch++)
+                {
+                    sum += samples[(startSample + i) * channels + ch];
+                }
+                mono[i] = sum / channels;
+            }
+        }
+        return mono;
+    }
+
+    static float[] Resample(float[] samples, int srcRate, int dstRate)
+    {
+        if (srcRate == dstRate)
+        {
+            return samples;
+        }
+        double ratio = (double)dstRate / srcRate;
+        int newLength = (int)(samples.Length * ratio);
+        var result = new float[newLength];
+        for (int i = 0; i < newLength; i++)
+        {
+            double srcPos = i / ratio;
+            int srcIdx = (int)srcPos;
+            double frac = srcPos - srcIdx;
+            if (srcIdx + 1 < samples.Length)
+            {
+                result[i] = (float)(samples[srcIdx] * (1 - frac) + samples[srcIdx + 1] * frac);
+            }
+            else
+            {
+                result[i] = samples[srcIdx];
+            }
+        }
+        return result;
     }
 
     /// <summary>
