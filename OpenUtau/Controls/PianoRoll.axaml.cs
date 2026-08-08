@@ -1219,12 +1219,6 @@ namespace OpenUtau.App.Controls {
                         return;
                     }
                 }
-                // Plain click on errored phoneme alias shows error details
-                var clickAliasInfo = ViewModel.NotesViewModel.HitTest.HitTestAlias(args.GetPosition(control));
-                if (clickAliasInfo.hit && clickAliasInfo.phoneme.Error && clickAliasInfo.phoneme.ErrorException != null) {
-                    _ = MessageBox.ShowError(RootWindow, clickAliasInfo.phoneme.ErrorException);
-                    return;
-                }
                 var hitInfo = ViewModel.NotesViewModel.HitTest.HitTestPhoneme(point.Position);
                 if (hitInfo.hit) {
                     var phoneme = hitInfo.phoneme;
