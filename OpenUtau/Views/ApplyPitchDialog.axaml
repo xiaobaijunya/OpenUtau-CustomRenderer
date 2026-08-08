@@ -1,0 +1,66 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="380" d:DesignHeight="280"
+        x:Class="OpenUtau.App.Views.ApplyPitchDialog"
+        Icon="/Assets/open-utau.ico"
+        Title="{DynamicResource dialogs.applypitch.caption}"
+        WindowStartupLocation="CenterOwner"
+        SizeToContent="Height" Width="380" CanResize="False">
+  <Window.Styles>
+    <Style Selector="TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="FontSize" Value="12"/>
+    </Style>
+    <Style Selector="RadioButton">
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
+      <Setter Property="FontSize" Value="12"/>
+    </Style>
+    <Style Selector="Button">
+      <Setter Property="FontSize" Value="12"/>
+    </Style>
+  </Window.Styles>
+  <Border Margin="{Binding $parent.WindowDecorationMargin}">
+    <StackPanel Margin="12" Spacing="6">
+
+      <!-- Method selection -->
+      <TextBlock Text="{DynamicResource dialogs.applypitch.algorithm}"
+                 FontWeight="SemiBold"/>
+      <StackPanel Margin="12,0,0,0" Spacing="2">
+        <Panel ToolTip.Tip="{Binding RmvpeNotFoundTip}">
+          <RadioButton Content="RMVPE"
+                       IsChecked="{Binding UseRmvpe}"
+                       IsEnabled="{Binding RmvpeAvailable}"/>
+        </Panel>
+        <RadioButton Content="CREPE"
+                     IsChecked="{Binding UseCrepe}"/>
+        <RadioButton Content="WORLD DIO"
+                     IsChecked="{Binding UseWorldDio}"/>
+        <RadioButton Content="WORLD Harvest"
+                     IsChecked="{Binding UseWorldHarvest}"/>
+        <RadioButton Content="WORLD PYIN"
+                     IsChecked="{Binding UseWorldPyin}"/>
+      </StackPanel>
+
+      <!-- Description -->
+      <TextBlock Text="{DynamicResource dialogs.applypitch.description}"
+                 TextWrapping="Wrap"
+                 Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"/>
+
+      <!-- Buttons -->
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+        <Button Content="{DynamicResource dialogs.messagebox.cancel}"
+                Click="OnCancelClicked"
+                Width="80"
+                Height="22"/>
+        <Button Content="{DynamicResource dialogs.messagebox.ok}"
+                Click="OnOkClicked"
+                Width="80"
+                Height="22"/>
+      </StackPanel>
+
+    </StackPanel>
+  </Border>
+</Window>
