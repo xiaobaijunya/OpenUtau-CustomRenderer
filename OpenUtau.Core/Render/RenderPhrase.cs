@@ -461,7 +461,10 @@ namespace OpenUtau.Core.Render {
                     case Format.Ustx.BREC: breathiness = curveSampled; break;
                     case Format.Ustx.VOIC: voicing = curveSampled; break;
                     case Format.Ustx.LOWC: lowcut = curveSampled; break;
-                    case Format.Ustx.BRI: warmth = curveSampled; break;
+                    case Format.Ustx.WARM:
+                        // 空曲线（new UCurve(descriptor)）不覆盖 warmth，避免双表达式并存时空值覆盖有效数据
+                        if (!curve.IsEmpty) { warmth = curveSampled; }
+                        break;
                     case Format.Ustx.HCMP: hcmp = curveSampled; break;
                     case Format.Ustx.BREL: breathLow = curveSampled; break;
                     case Format.Ustx.BREH: breathHigh = curveSampled; break;

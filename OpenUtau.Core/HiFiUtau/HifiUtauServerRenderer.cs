@@ -241,7 +241,7 @@ namespace OpenUtau.Core.HiFiUtau {
                     WriteFloatArray(writer, phrase.voicing);      // voic
                     WriteFloatArray(writer, phrase.breathLow);    // brel
                     WriteFloatArray(writer, phrase.breathHigh);   // breh
-                    WriteFloatArray(writer, phrase.warmth);       // bri
+                    WriteFloatArray(writer, phrase.warmth);       // warm
                     WriteFloatArray(writer, phrase.hcmp);         // hcmp
                     WriteFloatArray(writer, phrase.lowcut);       // lowc
                     // growl (gwl) 位于自定义曲线中
@@ -254,7 +254,7 @@ namespace OpenUtau.Core.HiFiUtau {
 
         /// <summary>
         /// 是否需要 HN-SEP 分离：与引擎侧判定一致。
-        /// breath/tension/brel/breh/bri/hcmp 任一处偏离默认 0，或 voicing 偏离默认 100。
+        /// breath/tension/brel/breh/warm/hcmp 任一处偏离默认 0，或 voicing 偏离默认 100。
         /// </summary>
         private static bool NeedsHnsep(RenderPhrase phrase) {
             return AnyNotClose(phrase.breathiness, 0, 0.5)

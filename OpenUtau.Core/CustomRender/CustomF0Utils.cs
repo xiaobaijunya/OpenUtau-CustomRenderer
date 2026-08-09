@@ -78,7 +78,7 @@ namespace OpenUtau.Core.CustomRender {
                         int ticks = GetTicks(phrase, i, frameMs);
                         return phrase.lowcut![ClampIndex(ticks, phrase.lowcut.Length)];
                     }),
-                ("bri",
+                ("warm",
                     () => phrase.warmth != null && phrase.warmth.Length > 0,
                     i => {
                         int ticks = GetTicks(phrase, i, frameMs);
