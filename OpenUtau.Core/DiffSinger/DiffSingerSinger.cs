@@ -78,6 +78,14 @@ namespace OpenUtau.Core.DiffSinger {
             subbanks.Clear();
             subbanks.AddRange(voicebank.Subbanks
                 .Select(subbank => new USubbank(subbank)));
+            // Single-speaker voicebanks usually have no "subbanks" in character.yaml,
+            // and SearchAll only calls LoadInfo (not LoadSubbanks), so Subbanks may be
+            // empty. Without a default subbank, DiffSingerBasePhonemizer.GetSpeakerAtIndex
+            // throws "No subbanks defined for singer" and phonemization fails entirely.
+            // Mirror LoadSubbanks' fallback by adding a default subbank.
+            if (subbanks.Count == 0) {
+                subbanks.Add(new USubbank(new Subbank()));
+            }
 
             //Load diffsinger config of a voicebank
             string configPath = Path.Combine(Location, "dsconfig.yaml");
