@@ -16,8 +16,9 @@ namespace OpenUtau.Core.Render {
         public const string DIFFSINGER = "DIFFSINGER";
     public const string VOICEVOX = "VOICEVOX";
     public const string CUSTOM_SERVER = "CUSTOM_SERVER";
+    public const string HIFIUTAU_LOCAL = "HIFIUTAU_LOCAL";
 
-    static readonly string[] classicRenderers = new[] { WORLDLINE_R, CLASSIC, CUSTOM_SERVER };
+    static readonly string[] classicRenderers = new[] { WORLDLINE_R, CLASSIC, CUSTOM_SERVER, HIFIUTAU_LOCAL };
         static readonly string[] enunuRenderers = new[] { ENUNU };
         static readonly string[] vogenRenderers = new[] { VOGEN };
         static readonly string[] diffSingerRenderers = new[] { DIFFSINGER };
@@ -43,6 +44,7 @@ namespace OpenUtau.Core.Render {
 
         public static List<string> getRendererOptions() {
             return new List<string> {
+                "HiFiUTAU Local",
                 "Custom Server",
                 "WORLDLINE-R",
                 "Classic"
@@ -56,6 +58,9 @@ namespace OpenUtau.Core.Render {
                     return CUSTOM_SERVER;
                 }
                 switch (defaultRenderer) {
+                    case "HiFiUTAU Local":
+                    case "HiFiUTAU Online":  // 兼容旧默认偏好
+                        return HIFIUTAU_LOCAL;
                     case "Custom Server":
                         return CUSTOM_SERVER;
                     case "Classic":
@@ -84,6 +89,8 @@ namespace OpenUtau.Core.Render {
                 return new Voicevox.VoicevoxRenderer();
             } else if (renderer == CUSTOM_SERVER) {
                 return new CustomRender.CustomServerRenderer();
+            } else if (renderer == HIFIUTAU_LOCAL || renderer == "HIFIUTAU_ONLINE") {
+                return new HiFiUtau.HifiUtauServerRenderer();
             }
             return null;
         }

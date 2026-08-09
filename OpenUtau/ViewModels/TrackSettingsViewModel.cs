@@ -4,6 +4,7 @@ using DynamicData.Binding;
 using OpenUtau.Classic;
 using OpenUtau.Core;
 using OpenUtau.Core.CustomRender;
+using OpenUtau.Core.HiFiUtau;
 using OpenUtau.Core.Render;
 using OpenUtau.Core.Ustx;
 using OpenUtau.Core.Util;
@@ -21,6 +22,8 @@ namespace OpenUtau.App.ViewModels {
         [Reactive] public bool NeedsWavtool { get; set; }
         [Reactive] public bool IsNotClassic { get; set; }
         [Reactive] public bool IsCustomServer { get; set; }
+        [Reactive] public bool IsHiFiUtau { get; set; }
+        [Reactive] public bool IsServerRenderer { get; set; }
         [Reactive] public string ServerUrl { get; set; } = "http://localhost:8000";
         [Reactive] public string Endpoint { get; set; } = "/synthesize";
 
@@ -54,10 +57,14 @@ namespace OpenUtau.App.ViewModels {
                 NeedsWavtool = Renderers.CLASSIC == renderer;
                 IsNotClassic = Renderers.CLASSIC != renderer;
                 IsCustomServer = renderer == Renderers.CUSTOM_SERVER;
-                
+                IsHiFiUtau = renderer == Renderers.HIFIUTAU_LOCAL;
+                IsServerRenderer = IsCustomServer || IsHiFiUtau;
+
                 if (IsCustomServer && Track.RendererSettings.Renderer is CustomServerRenderer customServerRenderer) {
                     ServerUrl = customServerRenderer.ServerUrl;
                     Endpoint = customServerRenderer.Endpoint;
+                } else if (IsHiFiUtau && Track.RendererSettings.Renderer is HifiUtauServerRenderer hifiUtauRenderer) {
+                    ServerUrl = hifiUtauRenderer.ServerUrl;
                 }
             }
             this.WhenAnyValue(x => x.Resampler)
@@ -101,9 +108,11 @@ namespace OpenUtau.App.ViewModels {
         }
 
         public void SetDefaultServerUrl() {
-            if (IsCustomServer) {
+            if (IsCustomServer || IsHiFiUtau) {
                 Preferences.Default.DefaultServerUrl = ServerUrl;
-                Preferences.Default.DefaultEndpoint = Endpoint;
+                if (IsCustomServer) {
+                    Preferences.Default.DefaultEndpoint = Endpoint;
+                }
                 Preferences.Save();
             }
         }
@@ -123,6 +132,13 @@ namespace OpenUtau.App.ViewModels {
                 settings.renderer = Renderers.CUSTOM_SERVER;
                 settings.serverUrl = ServerUrl;
                 settings.endpoint = Endpoint;
+                DocManager.Inst.ExecuteCmd(new TrackChangeRenderSettingCommand(DocManager.Inst.Project, Track, settings));
+                DocManager.Inst.EndUndoGroup();
+            } else if (IsHiFiUtau) {
+                DocManager.Inst.StartUndoGroup("command.track.setting");
+                var settings = Track.RendererSettings.Clone();
+                settings.renderer = Renderers.HIFIUTAU_LOCAL;
+                settings.serverUrl = ServerUrl;
                 DocManager.Inst.ExecuteCmd(new TrackChangeRenderSettingCommand(DocManager.Inst.Project, Track, settings));
                 DocManager.Inst.EndUndoGroup();
             }

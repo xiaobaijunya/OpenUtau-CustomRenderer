@@ -461,7 +461,7 @@ namespace OpenUtau.Core.Render {
                     case Format.Ustx.BREC: breathiness = curveSampled; break;
                     case Format.Ustx.VOIC: voicing = curveSampled; break;
                     case Format.Ustx.LOWC: lowcut = curveSampled; break;
-                    case Format.Ustx.WARM: warmth = curveSampled; break;
+                    case Format.Ustx.BRI: warmth = curveSampled; break;
                     case Format.Ustx.HCMP: hcmp = curveSampled; break;
                     case Format.Ustx.BREL: breathLow = curveSampled; break;
                     case Format.Ustx.BREH: breathHigh = curveSampled; break;

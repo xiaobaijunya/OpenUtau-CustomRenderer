@@ -1,6 +1,5 @@
-﻿﻿using System;
+using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,50 +9,54 @@ using OpenUtau.Core.Ustx;
 using OpenUtau.Core.Util;
 using Serilog;
 
-namespace OpenUtau.Core.CustomRender {
-    public class CustomRenderEngine : IRenderEngine {
-        public static bool ShouldUseCustomRenderEngine(UProject project) {
+namespace OpenUtau.Core.HiFiUtau {
+    /// <summary>
+    /// HiFiUTAU Local 渲染引擎 — 与 CustomRenderEngine 逻辑等价，但完全独立。
+    /// 不特判任何具体渲染器，统一调用 phrase.renderer.Render(...)，
+    /// 因此删除 CustomRenderer 后此引擎不受影响。
+    ///
+    /// 通过 CreateRenderEngine 工厂选择：项目使用 HiFiUTAU 渲染器时返回本引擎，
+    /// 否则返回 null（由调用方回退到其它引擎）。
+    /// </summary>
+    public class HifiUtauRenderEngine : IRenderEngine {
+        public static bool ShouldUseHifiUtauEngine(UProject project) {
             if (project == null || project.parts == null) {
                 return false;
             }
-            
             return project.parts
                 .Where(part => part is UVoicePart)
                 .Cast<UVoicePart>()
                 .Any(part => {
                     var request = part.GetRenderRequest();
-                    return request != null && request.phrases.Any(p => p.renderer is CustomServerRenderer);
+                    return request != null && request.phrases.Any(p => p.renderer is HifiUtauServerRenderer);
                 });
         }
-        
+
         internal static IRenderEngine CreateRenderEngine(UProject project, int startTick = 0, int endTick = -1, int trackNo = -1) {
-            if (ShouldUseCustomRenderEngine(project)) {
-                return new CustomRenderEngine(project, startTick, endTick, trackNo);
-            } else {
-                return new Render.RenderEngine(project, startTick, endTick, trackNo);
+            if (ShouldUseHifiUtauEngine(project)) {
+                return new HifiUtauRenderEngine(project, startTick, endTick, trackNo);
             }
+            return null;
         }
+
         readonly UProject project;
         readonly int startTick;
         readonly int endTick;
         readonly int trackNo;
         readonly int maxConcurrency;
-        readonly string serverUrl;
 
-        public CustomRenderEngine(
-            UProject project, 
-            int startTick = 0, 
-            int endTick = -1, 
+        public HifiUtauRenderEngine(
+            UProject project,
+            int startTick = 0,
+            int endTick = -1,
             int trackNo = -1,
-            int maxConcurrency = 0,
-            string serverUrl = "http://localhost:8000/synthesize") {
+            int maxConcurrency = 0) {
             this.project = project;
             this.startTick = startTick;
             this.endTick = endTick;
             this.trackNo = trackNo;
             this.maxConcurrency = maxConcurrency > 0 ? maxConcurrency
                 : (Preferences.Default?.NumRenderThreads).GetValueOrDefault(2);
-            this.serverUrl = serverUrl;
         }
 
         public Tuple<WaveMix, List<Fader>> RenderMixdown(TaskScheduler uiScheduler, ref CancellationTokenSource cancellation, bool wait = false) {
@@ -215,10 +218,7 @@ namespace OpenUtau.Core.CustomRender {
                     .Zip(req.sources, (phrase, source) => Tuple.Create(phrase, source, req)))
                 .ToArray();
             if (playing) {
-                // 按播放优先排序：
-                // 1) 播放位置及之后结束的片段优先（包含正在播放的片段）
-                // 2) 播放位置之前结束的片段排后面
-                // 两组内各自按 position 升序
+                // 按播放优先排序：播放位置及之后结束的片段优先
                 Array.Sort(tuples, (a, b) => {
                     bool aAfterStart = a.Item1.end > startTick;
                     bool bAfterStart = b.Item1.end > startTick;
@@ -233,27 +233,19 @@ namespace OpenUtau.Core.CustomRender {
             var phrases = tuples.Select(t => t.Item1).ToArray();
             var sources = tuples.Select(t => t.Item2).ToArray();
 
-            var customRenderer = new CustomServerRenderer(serverUrl);
-
             if (playing) {
                 // ===== 播放模式：按位置顺序排队渲染 =====
-                // 始终保持最多 maxConcurrency 个 HTTP 请求在执行，
-                // 且总是最靠前的未完成片段优先启动，避免后面先渲染完而前面卡顿。
                 var inProgress = new List<Task<(int index, RenderResult result)>>();
                 int nextToStart = 0;
-
                 while ((inProgress.Count > 0 || nextToStart < phrases.Length)
                        && !cancellation.IsCancellationRequested) {
-                    // 补充任务槽位：按顺序启动，保持最多 maxConcurrency 个并发
                     while (inProgress.Count < maxConcurrency && nextToStart < phrases.Length) {
                         int idx = nextToStart++;
                         var phrase = phrases[idx];
                         var phraseRequest = tuples[idx].Item3;
                         inProgress.Add(RenderOnePhrase(
-                            idx, phrase, progress, phraseRequest, customRenderer, cancellation));
+                            idx, phrase, progress, phraseRequest, cancellation));
                     }
-
-                    // 等待任意一个完成（由于按顺序启动，通常靠前的先完成）
                     var completed = await Task.WhenAny(inProgress).ConfigureAwait(false);
                     inProgress.Remove(completed);
                     var (index, result) = await completed.ConfigureAwait(false);
@@ -263,44 +255,24 @@ namespace OpenUtau.Core.CustomRender {
                     }
                 }
             } else {
-                // ===== 非播放模式：全部并发（导出等场景，顺序不重要） =====
-                var httpSemaphore = new SemaphoreSlim(maxConcurrency);
+                // ===== 非播放模式：全部并发（导出等场景） =====
+                var semaphore = new SemaphoreSlim(maxConcurrency);
                 var tasks = new Task<(int index, RenderResult result)>[phrases.Length];
-
                 for (int i = 0; i < phrases.Length; i++) {
                     int idx = i;
                     var phrase = phrases[idx];
                     var phraseRequest = tuples[idx].Item3;
-
                     tasks[idx] = Task.Run(async () => {
-                        string? preJson = null;
-                        bool needHttp = false;
-
-                        if (phrase.renderer is CustomServerRenderer) {
-                            var wavPath = Path.Join(PathManager.Inst.CachePath,
-                                $"custom-{phrase.hash:x16}.wav");
-                            if (!File.Exists(wavPath)) {
-                                preJson = CustomServerRenderer.ConvertPhraseToJson(phrase);
-                                needHttp = true;
-                            }
-                        }
-
-                        if (needHttp) {
-                            await httpSemaphore.WaitAsync(cancellation.Token)
-                                .ConfigureAwait(false);
-                        }
+                        await semaphore.WaitAsync(cancellation.Token).ConfigureAwait(false);
                         try {
-                            return await RenderOnePhraseCore(
-                                idx, phrase, progress, phraseRequest, customRenderer,
-                                cancellation, preJson).ConfigureAwait(false);
+                            return await RenderOnePhrase(
+                                idx, phrase, progress, phraseRequest, cancellation)
+                                .ConfigureAwait(false);
                         } finally {
-                            if (needHttp) {
-                                httpSemaphore.Release();
-                            }
+                            semaphore.Release();
                         }
                     }, cancellation.Token);
                 }
-
                 var results = await Task.WhenAll(tasks).ConfigureAwait(false);
                 foreach (var (index, result) in results) {
                     PublishPhraseResult(tuples[index].Item3, sources, index, result);
@@ -309,9 +281,7 @@ namespace OpenUtau.Core.CustomRender {
             progress.Clear();
         }
 
-        /// <summary>
-        /// 单个 phrase 渲染完成后的公共处理：写入采样、按需更新 part.Mix、通知刷新。
-        /// </summary>
+        /// <summary>单个 phrase 渲染完成后的公共处理。</summary>
         private static void PublishPhraseResult(RenderPartRequest request, WaveSource[] sources, int index, RenderResult result) {
             sources[index].SetSamples(result.samples);
             if (request.ShouldPublishMix()) {
@@ -320,47 +290,13 @@ namespace OpenUtau.Core.CustomRender {
             DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));
         }
 
-        /// <summary>
-        /// 渲染单个 phrase（播放模式使用）。
-        /// 不做并发控制，由调用方（RenderRequests）负责按顺序调度。
-        /// </summary>
+        /// <summary>渲染单个 phrase（统一委托给 phrase.renderer）。</summary>
         private async Task<(int index, RenderResult result)> RenderOnePhrase(
             int idx, RenderPhrase phrase, Progress progress,
-            RenderPartRequest request, CustomServerRenderer customRenderer,
-            CancellationTokenSource cancellation) {
-
-            string? preJson = null;
-            if (phrase.renderer is CustomServerRenderer) {
-                var wavPath = Path.Join(PathManager.Inst.CachePath,
-                    $"custom-{phrase.hash:x16}.wav");
-                if (!File.Exists(wavPath)) {
-                    preJson = CustomServerRenderer.ConvertPhraseToJson(phrase);
-                }
-            }
-
-            return await RenderOnePhraseCore(
-                idx, phrase, progress, request, customRenderer,
-                cancellation, preJson).ConfigureAwait(false);
-        }
-
-        /// <summary>
-        /// 渲染单个 phrase 的核心逻辑（播放 / 非播放共用）。
-        /// </summary>
-        private static async Task<(int index, RenderResult result)> RenderOnePhraseCore(
-            int idx, RenderPhrase phrase, Progress progress,
-            RenderPartRequest request, CustomServerRenderer customRenderer,
-            CancellationTokenSource cancellation, string? preJson) {
-
-            RenderResult result;
-            if (phrase.renderer is CustomServerRenderer) {
-                result = await customRenderer.RenderImpl(
-                    phrase, progress, request.trackNo, cancellation, false, preJson)
-                    .ConfigureAwait(false);
-            } else {
-                result = await phrase.renderer.Render(
-                    phrase, progress, request.trackNo, cancellation, false)
-                    .ConfigureAwait(false);
-            }
+            RenderPartRequest request, CancellationTokenSource cancellation) {
+            var result = await phrase.renderer.Render(
+                phrase, progress, request.trackNo, cancellation, false)
+                .ConfigureAwait(false);
             return (idx, result);
         }
     }

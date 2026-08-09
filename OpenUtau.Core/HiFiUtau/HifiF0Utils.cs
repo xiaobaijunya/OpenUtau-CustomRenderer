@@ -1,12 +1,15 @@
-﻿﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using OpenUtau.Core.Render;
 using OpenUtau.Core.Ustx;
 using OpenUtau.Core.Util;
 
-namespace OpenUtau.Core.CustomRender {
-    public static class CustomF0Utils {
+namespace OpenUtau.Core.HiFiUtau {
+    /// <summary>
+    /// 曲线采样工具（由原 CustomRender.CustomF0Utils 迁移，独立于 CustomRenderer）。
+    /// </summary>
+    public static class HifiF0Utils {
         private const int Interval = 5;
 
         /// <summary>

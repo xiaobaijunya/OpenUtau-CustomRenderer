@@ -10,6 +10,13 @@ using OpenUtau.Classic;
 using Serilog;
 
 namespace OpenUtau.Core.Render {
+    internal interface IRenderEngine {
+        Tuple<WaveMix, List<Fader>> RenderMixdown(TaskScheduler uiScheduler, ref CancellationTokenSource cancellation, bool wait = false);
+        Tuple<MasterAdapter, List<Fader>> RenderProject(TaskScheduler uiScheduler, ref CancellationTokenSource cancellation);
+        List<WaveMix> RenderTracks(TaskScheduler uiScheduler, ref CancellationTokenSource cancellation);
+        void PreRenderProject(ref CancellationTokenSource cancellation);
+    }
+
     public class Progress {
         readonly int total;
         int completed = 0;
@@ -40,9 +47,15 @@ namespace OpenUtau.Core.Render {
         public RenderPhrase[] phrases;
         public WaveSource[] sources;
         public WaveMix mix;
+
+        // 首次渲染直接覆盖 part.Mix；之后要等至少一个源就绪再覆盖，
+        // 避免用“全是静音”的新 mix 把已经显示的波形清空。
+        internal bool ShouldPublishMix() {
+            return part.Mix == null || sources.Any(s => s.HasSamples);
+        }
     }
 
-    class RenderEngine {
+    class RenderEngine : IRenderEngine {
         readonly UProject project;
         readonly int startTick;
         readonly int endTick;
@@ -241,9 +254,7 @@ namespace OpenUtau.Core.Render {
                     break;
                 }
                 source.SetSamples(task.Result.samples);
-                // Avoid clearing previously rendered waveform: only replace mix
-                // when first-time render (Mix==null) or enough sources are ready.
-                if (request.part.Mix == null || request.sources.Count(s => s.HasSamples) >= 3 || request.sources.All(s => s.HasSamples)) {
+                if (request.ShouldPublishMix()) {
                     request.part.SetMix(request.mix);
                 }
                 DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));

@@ -48,6 +48,18 @@ namespace OpenUtau.Core.Ustx {
                     customServerRenderer.Endpoint = endpoint;
                 }
             }
+            if (renderer == Renderers.HIFIUTAU_LOCAL || renderer == "HIFIUTAU_ONLINE") {
+                if (renderer == "HIFIUTAU_ONLINE") {
+                    // 旧项目迁移：HIFIUTAU_ONLINE → HIFIUTAU_LOCAL
+                    renderer = Renderers.HIFIUTAU_LOCAL;
+                }
+                if (string.IsNullOrEmpty(serverUrl)) {
+                    serverUrl = Preferences.Default.DefaultServerUrl;
+                }
+                if (Renderer is HiFiUtau.HifiUtauServerRenderer hifiUtauRenderer) {
+                    hifiUtauRenderer.ServerUrl = serverUrl;
+                }
+            }
             if (renderer == Renderers.CLASSIC) {
                 if (string.IsNullOrEmpty(resampler)) {
                     if (!Util.Preferences.Default.DefaultResamplers.TryGetValue(renderer, out resampler)) {

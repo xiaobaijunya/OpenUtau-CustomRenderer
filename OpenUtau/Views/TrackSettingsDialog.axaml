@@ -6,20 +6,20 @@
         x:Class="OpenUtau.App.Views.TrackSettingsDialog"
         Icon="/Assets/open-utau.ico"
         Title="{DynamicResource dialogs.tracksettings.caption}"
-        Height="184" Width="320" WindowStartupLocation="CenterOwner" CanResize="False">
+        Height="214" Width="320" WindowStartupLocation="CenterOwner" CanResize="False">
   <Border Margin="{Binding $parent.WindowDecorationMargin}">
     <StackPanel Margin="8">
       <TextBlock Text="{DynamicResource warning.renderer}" IsVisible="{Binding IsNotClassic}"/>
       
-      <TextBlock Text="Server URL" IsVisible="{Binding IsCustomServer}"/>
-      <TextBox HorizontalAlignment="Stretch" IsVisible="{Binding IsCustomServer}"
+      <TextBlock Text="Server URL" IsVisible="{Binding IsServerRenderer}"/>
+      <TextBox HorizontalAlignment="Stretch" IsVisible="{Binding IsServerRenderer}"
                Text="{Binding ServerUrl}" Watermark="http://localhost:8000"/>
       
       <TextBlock Text="Endpoint" IsVisible="{Binding IsCustomServer}"/>
       <TextBox HorizontalAlignment="Stretch" IsVisible="{Binding IsCustomServer}"
                Text="{Binding Endpoint}" Watermark="/synthesize"/>
       
-      <Grid ColumnDefinitions="*,8,*" IsVisible="{Binding IsCustomServer}">
+      <Grid ColumnDefinitions="*,8,*" IsVisible="{Binding IsServerRenderer}">
         <Button Grid.Column="2" Content="Set as Default"
                 HorizontalAlignment="Stretch" Command="{Binding SetDefaultServerUrl}"/>
       </Grid>

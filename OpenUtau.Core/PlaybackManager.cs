@@ -282,25 +282,24 @@ namespace OpenUtau.Core {
             AudioOutput.Play();
         }
 
+        private static IRenderEngine CreateRenderEngine(UProject project, int startTick = 0, int endTick = -1, int trackNo = -1) {
+            // 优先 HiFiUTAU Local 独立引擎；否则回退 CustomRender 引擎（含默认引擎）
+            var hifiEngine = HiFiUtau.HifiUtauRenderEngine.CreateRenderEngine(project, startTick, endTick, trackNo);
+            if (hifiEngine != null) {
+                return hifiEngine;
+            }
+            return CustomRenderEngine.CreateRenderEngine(project, startTick, endTick, trackNo);
+        }
+
         private void Render(UProject project, int tick, int endTick, int trackNo) {
             Task.Run(() => {
                 try {
-                    if (CustomRenderEngine.ShouldUseCustomRenderEngine(project)) {
-                        var engine = new CustomRenderEngine(project, startTick: tick, endTick: endTick, trackNo: trackNo);
-                        var result = engine.RenderProject(DocManager.Inst.MainScheduler, ref renderCancellation);
-                        if (result.Item1.IsPlayable()) {
-                            faders = result.Item2;
-                            StartPlayback(project.timeAxis.TickPosToMsPos(tick), result.Item1);
-                            PlayingMaster = true;
-                        }
-                    } else {
-                        RenderEngine engine = new RenderEngine(project, startTick: tick, endTick: endTick, trackNo: trackNo);
-                        var result = engine.RenderProject(DocManager.Inst.MainScheduler, ref renderCancellation);
-                        if (result.Item1.IsPlayable()) {
-                            faders = result.Item2;
-                            StartPlayback(project.timeAxis.TickPosToMsPos(tick), result.Item1);
-                            PlayingMaster = true;
-                        }
+                    var engine = CreateRenderEngine(project, startTick: tick, endTick: endTick, trackNo: trackNo);
+                    var result = engine.RenderProject(DocManager.Inst.MainScheduler, ref renderCancellation);
+                    if (result.Item1.IsPlayable()) {
+                        faders = result.Item2;
+                        StartPlayback(project.timeAxis.TickPosToMsPos(tick), result.Item1);
+                        PlayingMaster = true;
                     }
                     StartingToPlay = false;
                 } catch (Exception e) {
@@ -328,21 +327,17 @@ namespace OpenUtau.Core {
         public async Task RenderMixdown(UProject project, string exportPath) {
             await Task.Run(() => {
                 try {
-                    if (CustomRenderEngine.ShouldUseCustomRenderEngine(project)) {
-                        var engine = new CustomRenderEngine(project);
-                        var projectMix = engine.RenderMixdown(DocManager.Inst.MainScheduler, ref renderCancellation, wait: true).Item1;
-                        DocManager.Inst.ExecuteCmd(new ProgressBarNotification(0, $"Exporting to {exportPath}."));
-                        CheckFileWritable(exportPath);
+                    var engine = CreateRenderEngine(project);
+                    var projectMix = engine.RenderMixdown(DocManager.Inst.MainScheduler, ref renderCancellation, wait: true).Item1;
+                    DocManager.Inst.ExecuteCmd(new ProgressBarNotification(0, $"Exporting to {exportPath}."));
+                    CheckFileWritable(exportPath);
+                    // 自定义渲染器输出单声道采样，导出时统一转单声道；原版引擎保持原有导出格式。
+                    if (engine is CustomRenderEngine || engine is HiFiUtau.HifiUtauRenderEngine) {
                         WaveFileWriter.CreateWaveFile16(exportPath, new ExportAdapter(projectMix).ToMono(1, 0));
-                        DocManager.Inst.ExecuteCmd(new ProgressBarNotification(0, $"Exported to {exportPath}."));
                     } else {
-                        RenderEngine engine = new RenderEngine(project);
-                        var projectMix = engine.RenderMixdown(DocManager.Inst.MainScheduler, ref renderCancellation, wait: true).Item1;
-                        DocManager.Inst.ExecuteCmd(new ProgressBarNotification(0, $"Exporting to {exportPath}."));
-                        CheckFileWritable(exportPath);
                         WaveFileWriter.CreateWaveFile16(exportPath, new ExportAdapter(projectMix));
-                        DocManager.Inst.ExecuteCmd(new ProgressBarNotification(0, $"Exported to {exportPath}."));
                     }
+                    DocManager.Inst.ExecuteCmd(new ProgressBarNotification(0, $"Exported to {exportPath}."));
                 } catch (IOException ioe) {
                     var customEx = new MessageCustomizableException($"Failed to export {exportPath}.", $"<translate:errors.failed.export>: {exportPath}", ioe);
                     DocManager.Inst.ExecuteCmd(new ErrorMessageNotification(customEx));
@@ -360,14 +355,8 @@ namespace OpenUtau.Core {
             await Task.Run(() => {
                 string file = "";
                 try {
-                    List<WaveMix> trackMixes;
-                    if (CustomRenderEngine.ShouldUseCustomRenderEngine(project)) {
-                        var engine = new CustomRenderEngine(project);
-                        trackMixes = engine.RenderTracks(DocManager.Inst.MainScheduler, ref renderCancellation);
-                    } else {
-                        RenderEngine engine = new RenderEngine(project);
-                        trackMixes = engine.RenderTracks(DocManager.Inst.MainScheduler, ref renderCancellation);
-                    }
+                    var engine = CreateRenderEngine(project);
+                    var trackMixes = engine.RenderTracks(DocManager.Inst.MainScheduler, ref renderCancellation);
                     for (int i = 0; i < trackMixes.Count; ++i) {
                         if (trackMixes[i] == null || i >= project.tracks.Count || project.tracks[i].Muted) {
                             continue;
@@ -402,13 +391,8 @@ namespace OpenUtau.Core {
 
         void SchedulePreRender() {
             Log.Information("SchedulePreRender");
-            if (CustomRenderEngine.ShouldUseCustomRenderEngine(DocManager.Inst.Project)) {
-                var engine = new CustomRenderEngine(DocManager.Inst.Project);
-                engine.PreRenderProject(ref renderCancellation);
-            } else {
-                var engine = new RenderEngine(DocManager.Inst.Project);
-                engine.PreRenderProject(ref renderCancellation);
-            }
+            var engine = CreateRenderEngine(DocManager.Inst.Project);
+            engine.PreRenderProject(ref renderCancellation);
         }
 
         #region ICmdSubscriber
