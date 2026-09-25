@@ -110,9 +110,9 @@ namespace OpenUtau.Core.Ustx {
             tailIntrude = 0;
             tailOverlap = 0;
 
+            double prevDur = Prev != null ? Prev.DurationMs : 0;
             if (Prev != null) {
                 double gapMs = PositionMs - Prev.EndMs;
-                double prevDur = Prev.DurationMs;
                 double maxPreutter = autoPreutter;
                 if (gapMs <= 0) {
                     overlapped = true;
@@ -135,9 +135,31 @@ namespace OpenUtau.Core.Ustx {
             }
             preutter = Math.Max(0, autoPreutter + (preutterDelta ?? 0));
             overlap = autoOverlap + (overlapDelta ?? 0);
+            if (Prev != null && overlapped) {
+                // preutter > prevDur would make the previous phoneme's fade out start before its
+                // own beginning, so this phoneme never starts before the previous one does.
+                preutter = Math.Min(preutter, prevDur);
+            }
             if (Prev != null) {
                 Prev.tailIntrude = overlapped ? Math.Max(preutter, preutter - overlap) : 0;
                 Prev.tailOverlap = overlapped ? Math.Max(overlap, 0) : 0;
+                // The crossfade between Prev and its own previous phoneme is
+                // [Prev.DurationMs - Prev.preutter, Prev.DurationMs - Prev.preutter + Prev.overlap].
+                // It must not reach the start of Prev's crossfade with this phoneme, which is
+                // Prev.DurationMs - Prev.tailIntrude. Otherwise Prev's fade in would run into its
+                // own fade out (envelope not monotonic any more) and the crossfade would spill over
+                // into this phoneme past the beginning of the next crossfade.
+                // Prev.tailIntrude is this phoneme's preutter, so the preutter of the phoneme after
+                // Prev is already known here.
+                double prevMaxOverlap = Prev.preutter + Prev.DurationMs - Prev.tailIntrude;
+                if (Prev.overlap > prevMaxOverlap) {
+                    Prev.overlap = Math.Max(0, prevMaxOverlap);
+                    if (Prev.overlapped && Prev.Prev != null) {
+                        // Keep the grand previous phoneme's fade out in sync with Prev.overlap.
+                        Prev.Prev.tailOverlap = Prev.overlap;
+                        Prev.Prev.ValidateEnvelope(project, track, Prev.Prev.Parent);
+                    }
+                }
                 Prev.ValidateEnvelope(project, track, Prev.Parent);
             }
         }
