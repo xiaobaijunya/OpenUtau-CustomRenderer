@@ -90,6 +90,19 @@ namespace OpenUtau.App.Controls {
                     curveSelection = e.selection;
                     InvalidateVisual();
                 });
+            MessageBus.Current.Listen<PhonemeEditFilterEvent>()
+                .Subscribe(_ => InvalidateVisual());
+        }
+
+        /// <summary>
+        /// While the alias search put a phoneme edit scope in place, only the searched phonemes are
+        /// highlighted, even when their note is selected. Otherwise the note selection decides.
+        /// </summary>
+        private bool IsPhonemeHighlighted(UPhoneme phoneme, NotesViewModel viewModel) {
+            if (!string.IsNullOrEmpty(viewModel.PhonemeEditFilter)) {
+                return viewModel.MatchesPhonemeEditFilter(phoneme);
+            }
+            return selectedNotes.Contains(phoneme.Parent);
         }
 
         protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change) {
@@ -250,10 +263,10 @@ namespace OpenUtau.App.Controls {
                 if (leftBound >= rightTick || rightBound <= leftTick) {
                     continue;
                 }
-                var note = phoneme.Parent;
-                var hPen = selectedNotes.Contains(note) ? ThemeManager.AccentPen2Thickness2 : ThemeManager.AccentPen1Thickness2;
-                var vPen = selectedNotes.Contains(note) ? ThemeManager.AccentPen2Thickness3 : ThemeManager.AccentPen1Thickness3;
-                var brush = selectedNotes.Contains(note) ? ThemeManager.AccentBrush2 : ThemeManager.AccentBrush1;
+                bool highlighted = IsPhonemeHighlighted(phoneme, viewModel);
+                var hPen = highlighted ? ThemeManager.AccentPen2Thickness2 : ThemeManager.AccentPen1Thickness2;
+                var vPen = highlighted ? ThemeManager.AccentPen2Thickness3 : ThemeManager.AccentPen1Thickness3;
+                var brush = highlighted ? ThemeManager.AccentBrush2 : ThemeManager.AccentBrush1;
                 var (value, overriden) = phoneme.GetExpression(project, track, Key);
                 double x1 = Math.Round(viewModel.TickToneToPoint(phoneme.position, 0).X);
                 double x2 = Math.Round(viewModel.TickToneToPoint(phoneme.End, 0).X);

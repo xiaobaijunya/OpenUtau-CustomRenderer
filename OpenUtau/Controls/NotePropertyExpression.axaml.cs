@@ -38,7 +38,9 @@ namespace OpenUtau.App.Controls {
             if (sender is Control control) {
                 var point = args.GetCurrentPoint(control);
                 if (point.Properties.IsLeftButtonPressed) {
-                    DocManager.Inst.StartUndoGroup("command.property.edit");
+                    // One command per phoneme in the edit scope: validate once on release instead of
+                    // rebuilding every render phrase on each pointer move.
+                    DocManager.Inst.StartUndoGroup("command.property.edit", deferValidate: true);
                     NotePropertiesViewModel.PanelControlPressed = true;
                 } else if (point.Properties.IsRightButtonPressed) {
                     SetNumericalExpressions(null);
@@ -74,7 +76,7 @@ namespace OpenUtau.App.Controls {
 
         private void SetNumericalExpressions(string? expression) {
             if (DataContext is NotePropertyExpViewModel viewModel) {
-                DocManager.Inst.StartUndoGroup("command.property.edit");
+                DocManager.Inst.StartUndoGroup("command.property.edit", deferValidate: true);
                 NotePropertiesViewModel.PanelControlPressed = true;
                 viewModel.SetNumericalExpressions(expression);
                 NotePropertiesViewModel.PanelControlPressed = false;

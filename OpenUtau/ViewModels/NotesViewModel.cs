@@ -33,6 +33,16 @@ namespace OpenUtau.App.ViewModels {
         }
     }
     public class WaveformRefreshEvent { }
+    /// <summary>
+    /// Raised when the alias filter used to restrict phoneme parameter edits changes.
+    /// The value is null when there is no filter and note selection decides.
+    /// </summary>
+    public class PhonemeEditFilterEvent {
+        public readonly string? filter;
+        public PhonemeEditFilterEvent(string? filter) {
+            this.filter = filter;
+        }
+    }
 
     public class NotesViewModel : ViewModelBase, ICmdSubscriber {
         [Reactive] public Rect Bounds { get; set; }
@@ -111,6 +121,47 @@ namespace OpenUtau.App.ViewModels {
         private readonly ObservableAsPropertyHelper<double> smallChangeY;
 
         public readonly NoteSelectionViewModel Selection = new NoteSelectionViewModel();
+
+        /// <summary>
+        /// Only phonemes whose name contains this filter are changed by phoneme parameter edits
+        /// (e.g. drawing a phoneme expression). The alias search sets it when the user selects the
+        /// search results, so that selecting a note does not mean every phoneme of that note gets
+        /// edited. Empty means "no filter", and the note selection decides instead.
+        /// </summary>
+        public string? PhonemeEditFilter { get; private set; }
+
+        /// <summary>
+        /// Whether this phoneme matches the alias filter of the current edit scope.
+        /// True when there is no scope.
+        /// </summary>
+        public bool MatchesPhonemeEditFilter(UPhoneme phoneme) {
+            string? filter = PhonemeEditFilter;
+            return string.IsNullOrEmpty(filter)
+                || (phoneme.phoneme != null && phoneme.phoneme.Contains(filter, StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// Whether a phoneme parameter edit may change this phoneme.
+        /// </summary>
+        public bool IsPhonemeEditable(UPhoneme phoneme) {
+            if (!string.IsNullOrEmpty(PhonemeEditFilter)) {
+                // Alias search selection: only the searched aliases are edited.
+                // Compare by name, so the filter survives phoneme rebuilds during the edit.
+                return MatchesPhonemeEditFilter(phoneme);
+            }
+            if (Preferences.Default.LockUnselectedNotesExpressions && Selection.Count > 0) {
+                return Selection.Contains(phoneme.Parent);
+            }
+            return true;
+        }
+
+        public void SetPhonemeEditFilter(string? filter) {
+            if (PhonemeEditFilter == filter) {
+                return;
+            }
+            PhonemeEditFilter = string.IsNullOrEmpty(filter) ? null : filter;
+            MessageBus.Current.SendMessage(new PhonemeEditFilterEvent(PhonemeEditFilter));
+        }
 
         internal NotesViewModelHitTest HitTest;
         private int _lastNoteLength = 480;
@@ -580,6 +631,7 @@ namespace OpenUtau.App.ViewModels {
 
         private void UnloadPart() {
             DeselectNotes();
+            SetPhonemeEditFilter(null);
             Part = null;
             LoadPortrait(null, null);
             LoadWindowTitle(null, null);

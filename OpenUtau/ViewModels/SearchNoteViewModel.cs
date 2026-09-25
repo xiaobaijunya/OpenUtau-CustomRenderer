@@ -61,6 +61,8 @@ namespace OpenUtau.App.ViewModels {
         }
 
         void Search() {
+            // A new search invalidates the previous result selection, so drop the phoneme edit scope.
+            notesViewModel.SetPhonemeEditFilter(null);
             if (!string.IsNullOrEmpty(SearchWord) && notesViewModel.Part != null) {
                 if (NoteMode) {
                     notes = notesViewModel.Part.notes.Where(n => IsMatch(n.lyric)).ToList();
@@ -121,7 +123,18 @@ namespace OpenUtau.App.ViewModels {
             foreach (var note in notes) {
                 notesViewModel.Selection.Add(note);
             }
+            // In alias mode the searched phonemes, not every phoneme of the selected notes, are
+            // the ones phoneme parameter edits should change.
+            notesViewModel.SetPhonemeEditFilter(NoteMode ? null : SearchWord);
             MessageBus.Current.SendMessage(new NotesSelectionEvent(notesViewModel.Selection));
+        }
+
+        /// <summary>
+        /// Drops the phoneme edit scope this search may have set, so that later phoneme parameter
+        /// edits fall back to the note selection.
+        /// </summary>
+        public void ClearPhonemeEditFilter() {
+            notesViewModel.SetPhonemeEditFilter(null);
         }
 
         public void UpdateResult(){

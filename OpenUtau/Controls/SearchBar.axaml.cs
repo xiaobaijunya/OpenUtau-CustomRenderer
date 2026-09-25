@@ -53,6 +53,8 @@ namespace OpenUtau.App.Controls {
             IsVisible = false;
             if (viewModel != null) {
                 noteMode = viewModel.NoteMode;
+                // Leave any phoneme edit scope the search set, so later edits are not restricted.
+                viewModel.ClearPhonemeEditFilter();
             }
         }
 
@@ -78,6 +80,9 @@ namespace OpenUtau.App.Controls {
                     break;
                 case Key.Escape:
                     IsVisible = false;
+                    if (DataContext is SearchNoteViewModel vm) {
+                        vm.ClearPhonemeEditFilter();
+                    }
                     e.Handled = true;
                     break;
                 default:

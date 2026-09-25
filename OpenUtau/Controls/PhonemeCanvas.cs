@@ -89,11 +89,24 @@ namespace OpenUtau.App.Controls {
                         InvalidateVisual();
                     }
                 });
+            MessageBus.Current.Listen<PhonemeEditFilterEvent>()
+                .Subscribe(_ => InvalidateVisual());
         }
 
         protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change) {
             base.OnPropertyChanged(change);
             InvalidateVisual();
+        }
+
+        /// <summary>
+        /// While the alias search put a phoneme edit scope in place, only the searched phonemes are
+        /// highlighted, even when their note is selected. Otherwise the note selection decides.
+        /// </summary>
+        private bool IsPhonemeHighlighted(UPhoneme phoneme, NotesViewModel viewModel) {
+            if (!string.IsNullOrEmpty(viewModel.PhonemeEditFilter)) {
+                return viewModel.MatchesPhonemeEditFilter(phoneme);
+            }
+            return selectedNotes.Contains(phoneme.Parent);
         }
 
         public override void Render(DrawingContext context) {
@@ -135,8 +148,8 @@ namespace OpenUtau.App.Controls {
                     double x4 = viewModel.TickToneToPoint(timeAxis.MsPosToTickPos(posMs + phoneme.envelope.data[4].X) - Part.position, 0).X;
                     double y4 = (1 - phoneme.envelope.data[4].Y / 100) * height;
 
-                    var pen = selectedNotes.Contains(phoneme.Parent) ? ThemeManager.AccentPen2 : ThemeManager.AccentPen1;
-                    var brush = selectedNotes.Contains(phoneme.Parent) ? ThemeManager.AccentBrush2Semi : ThemeManager.AccentBrush1Semi;
+                    var pen = IsPhonemeHighlighted(phoneme, viewModel) ? ThemeManager.AccentPen2 : ThemeManager.AccentPen1;
+                    var brush = IsPhonemeHighlighted(phoneme, viewModel) ? ThemeManager.AccentBrush2Semi : ThemeManager.AccentBrush1Semi;
 
                     var point0 = new Point(x0, y + y0);
                     var point1 = new Point(x1, y + y1);

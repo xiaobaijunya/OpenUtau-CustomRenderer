@@ -161,7 +161,33 @@ namespace OpenUtau.App.ViewModels {
                     NoteLoading = false;
                 });
 
+            MessageBus.Current.Listen<PhonemeEditFilterEvent>()
+                .Subscribe(e => {
+                    if (phonemeEditFilter != e.filter) {
+                        phonemeEditFilter = e.filter;
+                        // Show the values of the phonemes that are actually edited.
+                        AttachExpressions();
+                    }
+                });
+
             DocManager.Inst.AddSubscriber(this);
+        }
+
+        private string? phonemeEditFilter;
+
+        /// <summary>
+        /// Phonemes of the selected notes that the alias search narrowed the edit scope to,
+        /// or null when there is no scope and the whole selected notes are edited.
+        /// </summary>
+        private List<UPhoneme>? ScopedPhonemes() {
+            if (string.IsNullOrEmpty(phonemeEditFilter) || Part == null) {
+                return null;
+            }
+            string filter = phonemeEditFilter;
+            return Part.phonemes
+                .Where(p => selectedNotes.Contains(p.Parent))
+                .Where(p => p.phoneme != null && p.phoneme.Contains(filter, StringComparison.Ordinal))
+                .ToList();
         }
 
         // note -> panel
@@ -315,10 +341,14 @@ namespace OpenUtau.App.ViewModels {
             if (Expressions.Count > 0) {
                 if (selectedNotes.Count > 0) {
                     var note = selectedNotes.First();
+                    // Normally the panel shows the expressions of the note's first phoneme. When the
+                    // alias search narrowed the edit scope, show the first phoneme of that scope.
+                    var scopedPhonemes = ScopedPhonemes();
+                    int index = scopedPhonemes?.FirstOrDefault(p => p.Parent == note)?.index ?? 0;
 
                     foreach (NotePropertyExpViewModel exp in Expressions) {
                         exp.IsNoteSelected = true;
-                        var phonemeExpression = note.phonemeExpressions.FirstOrDefault(e => e.abbr == exp.abbr && e.index == 0);
+                        var phonemeExpression = note.phonemeExpressions.FirstOrDefault(e => e.abbr == exp.abbr && e.index == index);
                         if (phonemeExpression != null) {
                             if (exp.IsNumerical) {
                                 exp.Value = phonemeExpression.value;
@@ -333,10 +363,10 @@ namespace OpenUtau.App.ViewModels {
                                 exp.SelectedOption = (int)exp.defaultValue;
                             }
 
-                            if (selectedNotes.Any(note => note.phonemeExpressions.FirstOrDefault(e => e.abbr == exp.abbr) != null)) {
-                                exp.HasValue = true;
+                            if (scopedPhonemes != null) {
+                                exp.HasValue = scopedPhonemes.Any(p => p.Parent.phonemeExpressions.Any(e => e.abbr == exp.abbr && e.index == p.index));
                             } else {
-                                exp.HasValue = false;
+                                exp.HasValue = selectedNotes.Any(n => n.phonemeExpressions.FirstOrDefault(e => e.abbr == exp.abbr) != null);
                             }
                         }
                     }
@@ -682,7 +712,7 @@ namespace OpenUtau.App.ViewModels {
                 if (track.TryGetExpDescriptor(DocManager.Inst.Project, abbr, out UExpressionDescriptor descriptor) && descriptor.CustomDefaultValue == value) {
                     value = null;
                 }
-                DocManager.Inst.ExecuteCmd(new SetNotesSameExpressionCommand(DocManager.Inst.Project, track, Part, selectedNotes, abbr, value));
+                SetExpressionChanges(track, abbr, value);
             }
         }
         public void SetOptionalExpressionsChanges(string abbr, int? value) {
@@ -691,9 +721,30 @@ namespace OpenUtau.App.ViewModels {
                 if (track.TryGetExpDescriptor(DocManager.Inst.Project, abbr, out UExpressionDescriptor descriptor) && descriptor.defaultValue == value) {
                     value = null;
                 }
-                DocManager.Inst.StartUndoGroup("command.exp.edit");
-                DocManager.Inst.ExecuteCmd(new SetNotesSameExpressionCommand(DocManager.Inst.Project, track, Part, selectedNotes, abbr, value));
+                DocManager.Inst.StartUndoGroup("command.exp.edit", deferValidate: true);
+                SetExpressionChanges(track, abbr, value);
                 DocManager.Inst.EndUndoGroup();
+            }
+        }
+
+        /// <summary>
+        /// Applies an expression value to the selected notes. When the alias search narrowed the
+        /// edit scope to specific phonemes, only those phonemes are changed, instead of every
+        /// phoneme of the selected notes.
+        /// </summary>
+        private void SetExpressionChanges(UTrack track, string abbr, float? value) {
+            if (Part == null) {
+                return;
+            }
+            var scopedPhonemes = ScopedPhonemes();
+            if (scopedPhonemes != null) {
+                foreach (var phoneme in scopedPhonemes) {
+                    DocManager.Inst.ExecuteCmd(new SetPhonemeExpressionCommand(
+                        DocManager.Inst.Project, track, Part, phoneme, abbr, value));
+                }
+            } else {
+                DocManager.Inst.ExecuteCmd(new SetNotesSameExpressionCommand(
+                    DocManager.Inst.Project, track, Part, selectedNotes, abbr, value));
             }
         }
 
