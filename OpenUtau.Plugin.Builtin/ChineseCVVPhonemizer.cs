@@ -22,10 +22,8 @@ namespace OpenUtau.Plugin.Builtin {
         protected override IG2p LoadG2p() {
             var g2ps = new List<IG2p>();
 
-            // 硬编码默认音素词典，直接根据歌词匹配 _V
-            g2ps.Add(new ChineseCVVG2p());
-
-            // Load dic.txt from singer folder for overrides.
+            // 方案A：外部 dic.txt 优先。
+            // 只有在 dic.txt 中查不到该歌词时，才回落到音素器自带的硬编码词典。
             if (singer != null && singer.Found && singer.Loaded) {
                 string file = Path.Combine(singer.Location, "dic.txt");
                 if (File.Exists(file)) {
@@ -36,6 +34,10 @@ namespace OpenUtau.Plugin.Builtin {
                     }
                 }
             }
+
+            // 硬编码默认音素词典，直接根据歌词匹配 _V，作为兜底。
+            g2ps.Add(new ChineseCVVG2p());
+
             return new G2pFallbacks(g2ps.ToArray());
         }
 
@@ -50,11 +52,60 @@ namespace OpenUtau.Plugin.Builtin {
         }
 
         public override Result Process(Note[] notes, Note? prev, Note? next, Note? prevNeighbour, Note? nextNeighbour, Note[] prevNeighbours) {
+            string lyric = notes[0].lyric?.Trim() ?? string.Empty;
+
+            // ===== 收尾音符：R / B / - =====
+            // 与 CVVC 一致：不再由前一个音符生成 "_V" 尾音，
+            // 而是由本音符生成 "<前一元音> R" / "<前一元音> B" / "<前一元音> -"。
+            // 前一元音取自 dic 第二列（去掉开头的下划线），例如 "_ai" -> "ai"。
+            if (IsEndingLyric(lyric)) {
+                string ending = lyric == "-" ? "-" : lyric.ToUpperInvariant();
+                string? prevVowel = prevNeighbour == null ? null : GetTailVowel(prevNeighbour.Value);
+                if (!string.IsNullOrEmpty(prevVowel)) {
+                    var endAttr = notes[0].phonemeAttributes?.FirstOrDefault(attr => attr.index == 0) ?? default;
+                    string alias = $"{prevVowel} {ending}";
+                    if (singer != null &&
+                        singer.TryGetMappedOto(alias, notes[0].tone + endAttr.toneShift, endAttr.voiceColor, out var endOto)) {
+                        alias = endOto.Alias;
+                    }
+                    return new Result {
+                        phonemes = new Phoneme[] {
+                            new Phoneme() {
+                                phoneme = alias,
+                                position = 0,
+                                expressions = new List<PhonemeExpression>() {
+                                    new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 2 }
+                                }
+                            }
+                        }
+                    };
+                }
+                // 无法解析前一元音时，回退到基类行为。
+                return base.Process(notes, prev, next, prevNeighbour, nextNeighbour, prevNeighbours);
+            }
+
             var result = base.Process(notes, prev, next, prevNeighbour, nextNeighbour, prevNeighbours);
             int totalDuration = notes.Sum(n => n.duration);
             int endTick = notes[0].position + totalDuration;
 
             var phonemeList = new List<Phoneme>(result.phonemes);
+
+            // 若后一个音符是收尾音符(R/B/-)，本音符不再生成 "_V" 尾音，
+            // 仅保留 CV 音素（尾音交由后面的收尾音符处理）。
+            if (nextNeighbour != null && IsEndingLyric(nextNeighbour.Value.lyric)) {
+                if (phonemeList.Count > 1) {
+                    phonemeList.RemoveRange(1, phonemeList.Count - 1);
+                }
+                for (int i = 0; i < phonemeList.Count; i++) {
+                    var p = phonemeList[i];
+                    p.position = 0;
+                    p.expressions = new List<PhonemeExpression>() {
+                        new PhonemeExpression() { abbr = Core.Format.Ustx.PHTP, value = 0 }
+                    };
+                    phonemeList[i] = p;
+                }
+                return new Result { phonemes = phonemeList.ToArray() };
+            }
 
             // 预先找出 CV 和 _V 的 phoneme 名称
             string? cvPhoneme = null;
@@ -164,6 +215,42 @@ namespace OpenUtau.Plugin.Builtin {
             }
             return ms > 0 ? timeAxis.MsToTickAt(ms, endTick) : 0;
         }
+
+        /// <summary>
+        /// 是否为收尾音符：R / B / -（大小写不敏感）。
+        /// </summary>
+        private static bool IsEndingLyric(string lyric) {
+            if (string.IsNullOrEmpty(lyric)) {
+                return false;
+            }
+            var l = lyric.Trim();
+            return l == "-"
+                || l.Equals("R", StringComparison.OrdinalIgnoreCase)
+                || l.Equals("B", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 取音符拆音后的尾音（dic 第二列 / 内置词典的 "_V"），并去掉开头的下划线。
+        /// 例如 "duang" -> "ang"，"ai" -> "ai"。
+        /// </summary>
+        private string? GetTailVowel(Note note) {
+            if (g2p != null) {
+                var symbols = g2p.Query(note.lyric.ToLowerInvariant());
+                if (symbols != null && symbols.Length > 1) {
+                    return symbols[1].TrimStart('_');
+                }
+            }
+            if (!string.IsNullOrEmpty(note.phoneticHint)) {
+                var hint = note.phoneticHint
+                    .Split()
+                    .Where(s => s.StartsWith("_"))
+                    .ToArray();
+                if (hint.Length > 0) {
+                    return hint.Last().TrimStart('_');
+                }
+            }
+            return null;
+        }
     }
     
     /// <summary>
@@ -215,7 +302,8 @@ namespace OpenUtau.Plugin.Builtin {
         }
 
         public bool IsVowel(string phoneme) {
-            return phoneme.StartsWith("_");
+            // 与内置词典保持一致："_V" 尾音视为辅音，其余视为元音。
+            return !phoneme.StartsWith("_");
         }
 
         public bool IsGlide(string phoneme) {
