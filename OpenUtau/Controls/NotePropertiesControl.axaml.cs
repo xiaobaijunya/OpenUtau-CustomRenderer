@@ -67,7 +67,8 @@ foreach (var box in this.GetLogicalDescendants().OfType<TextBox>()) {
         void OnTextBoxLostFocus(object? sender, RoutedEventArgs args) {
             Log.Debug("Note property textbox lost focus");
             if (sender is TextBox textBox && textBoxValue != textBox.Text && textBox.Tag is string tag && !string.IsNullOrEmpty(tag)) {
-                DocManager.Inst.StartUndoGroup("command.property.edit");
+                // Value is applied to every selected note, so defer validation to the end of the group.
+                DocManager.Inst.StartUndoGroup("command.property.edit", deferValidate: true);
                 NotePropertiesViewModel.PanelControlPressed = true;
                 ViewModel.SetNoteParams(tag, textBox.Text);
                 NotePropertiesViewModel.PanelControlPressed = false;
@@ -80,11 +81,13 @@ foreach (var box in this.GetLogicalDescendants().OfType<TextBox>()) {
             if (sender is Control control) {
                 var point = args.GetCurrentPoint(control);
                 if (point.Properties.IsLeftButtonPressed) {
-                    DocManager.Inst.StartUndoGroup("command.property.edit");
+                    // The whole slider drag is one gesture: validate once on release instead of on
+                    // every pointer move, which would rebuild all render phrases each time.
+                    DocManager.Inst.StartUndoGroup("command.property.edit", deferValidate: true);
                     NotePropertiesViewModel.PanelControlPressed = true;
                 } else if (point.Properties.IsRightButtonPressed) {
                     if (control.Tag is string tag && !string.IsNullOrEmpty(tag)) {
-                        DocManager.Inst.StartUndoGroup("command.property.reset");
+                        DocManager.Inst.StartUndoGroup("command.property.reset", deferValidate: true);
                         NotePropertiesViewModel.PanelControlPressed = true;
                         ViewModel.SetNoteParams(tag, null);
                         NotePropertiesViewModel.PanelControlPressed = false;

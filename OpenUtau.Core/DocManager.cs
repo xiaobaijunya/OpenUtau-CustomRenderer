@@ -276,7 +276,7 @@ namespace OpenUtau.Core {
                 undoQueue.RemoveFromFront();
             }
             if (undoGroup.DeferValidate) {
-                Project.ValidateFull();
+                Project.Validate(undoGroup.GetDeferredValidateOptions());
             }
             undoGroup.Merge();
             undoGroup = null;

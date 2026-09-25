@@ -49,6 +49,12 @@ namespace OpenUtau.App.Views {
         public IValueTip valueTip;
         protected virtual bool ShowValueTip => true;
         protected virtual string? commandNameKey => null;
+        /// <summary>
+        /// True for gestures that touch many commands but only need one validation at the end.
+        /// Without this every pointer move validates the part and rebuilds all render phrases.
+        /// States whose UI reads validation results (e.g. phoneme preutter/overlap) must keep false.
+        /// </summary>
+        protected virtual bool DeferValidate => false;
         public bool ctrlShiftHeld = false;
         public bool altShiftHeld = false;
         public bool shiftHeld = false;
@@ -63,7 +69,7 @@ namespace OpenUtau.App.Views {
         public virtual void Begin(IPointer pointer, Point point) {
             pointer.Capture(control);
             startPoint = point;
-            DocManager.Inst.StartUndoGroup(commandNameKey);
+            DocManager.Inst.StartUndoGroup(commandNameKey, DeferValidate);
             if (ShowValueTip) {
                 valueTip.ShowValueTip();
             }
@@ -566,6 +572,7 @@ namespace OpenUtau.App.Views {
         private int index;
         private PitchPoint pitchPoint;
         protected override string? commandNameKey => "command.pitch.editpoint";
+        protected override bool DeferValidate => true;
 
         public PitchPointEditState(
             Control control,
@@ -996,6 +1003,7 @@ namespace OpenUtau.App.Views {
     class VibratoChangeStartState : NoteEditState {
         public readonly UNote note;
         protected override string? commandNameKey => "command.vibrato.edit";
+        protected override bool DeferValidate => true;
 
         public VibratoChangeStartState(
             Control control,
@@ -1018,6 +1026,7 @@ namespace OpenUtau.App.Views {
     class VibratoChangeInState : NoteEditState {
         public readonly UNote note;
         protected override string? commandNameKey => "command.vibrato.edit";
+        protected override bool DeferValidate => true;
 
         public VibratoChangeInState(
             Control control,
@@ -1045,6 +1054,7 @@ namespace OpenUtau.App.Views {
     class VibratoChangeOutState : NoteEditState {
         public readonly UNote note;
         protected override string? commandNameKey => "command.vibrato.edit";
+        protected override bool DeferValidate => true;
 
         public VibratoChangeOutState(
             Control control,
@@ -1071,6 +1081,7 @@ namespace OpenUtau.App.Views {
     class VibratoChangeDepthState : NoteEditState {
         public readonly UNote note;
         protected override string? commandNameKey => "command.vibrato.edit";
+        protected override bool DeferValidate => true;
 
         public VibratoChangeDepthState(
             Control control,
@@ -1093,6 +1104,7 @@ namespace OpenUtau.App.Views {
     class VibratoChangePeriodState : NoteEditState {
         public readonly UNote note;
         protected override string? commandNameKey => "command.vibrato.edit";
+        protected override bool DeferValidate => true;
 
         public VibratoChangePeriodState(
             Control control,
@@ -1125,6 +1137,7 @@ namespace OpenUtau.App.Views {
         public readonly Point hitPoint;
         public readonly float initialShift;
         protected override string? commandNameKey => "command.vibrato.edit";
+        protected override bool DeferValidate => true;
 
         public VibratoChangeShiftState(
             Control control,

@@ -97,7 +97,9 @@ namespace OpenUtau.App.ViewModels {
                         PortamentoLength = portamentoPreset.PortamentoLength;
                         PortamentoStart = portamentoPreset.PortamentoStart;
 
-                        DocManager.Inst.StartUndoGroup("command.pitch.editpoint");
+                        // Defer validation: SetNoteParams executes one command per selected note,
+                        // validating per command rebuilds every render phrase of the part.
+                        DocManager.Inst.StartUndoGroup("command.pitch.editpoint", deferValidate: true);
                         PanelControlPressed = true;
                         SetNoteParams("PortamentoLength", portamentoPreset.PortamentoLength);
                         SetNoteParams("PortamentoStart", portamentoPreset.PortamentoStart);
@@ -109,7 +111,8 @@ namespace OpenUtau.App.ViewModels {
                 .WhereNotNull()
                 .Subscribe(vibratoPreset => {
                     if (vibratoPreset != null) {
-                        DocManager.Inst.StartUndoGroup("command.vibrato.edit");
+                        // One validation for the whole batch, instead of one per note per parameter.
+                        DocManager.Inst.StartUndoGroup("command.vibrato.edit", deferValidate: true);
                         PanelControlPressed = true;
                         SetNoteParams("VibratoLength", Math.Max(0, Math.Min(100, vibratoPreset.VibratoLength)));
                         SetNoteParams("VibratoPeriod", Math.Max(5, Math.Min(500, vibratoPreset.VibratoPeriod)));
@@ -127,7 +130,7 @@ namespace OpenUtau.App.ViewModels {
                 .WhereNotNull()
                 .Subscribe(shape => {
                     if (shape >= 0) {
-                        DocManager.Inst.StartUndoGroup("command.pitch.editpoint");
+                        DocManager.Inst.StartUndoGroup("command.pitch.editpoint", deferValidate: true);
                         PanelControlPressed = true;
                         SetNoteParams("PitchCurveShape", shape);
                         PanelControlPressed = false;
