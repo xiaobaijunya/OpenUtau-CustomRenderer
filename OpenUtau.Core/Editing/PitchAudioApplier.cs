@@ -296,7 +296,8 @@ public static class PitchAudioApplier
         };
 
         DocManager.Inst.StartUndoGroup("command.batch.note", true);
-        targetResult.ApplyToPart(project, targetPart);
+        targetResult.ApplyToPart(project, targetPart, 0,
+            tick => RenderPhrase.SampleBasePitch(targetPart, tick));
         DocManager.Inst.EndUndoGroup();
 
         Log.Information("PitchAudioApplier: successfully applied pitch from {SourceName} to target part.", sourcePart.DisplayName);
@@ -570,7 +571,8 @@ public static class PitchAudioApplier
             return false;
         }
 
-        var curve = BuildPitdCurve(targetResult, project, part, noteSegments, descriptor);
+        var curve = BuildPitdCurve(targetResult, project, part, noteSegments, descriptor,
+            tick => RenderPhrase.SampleBasePitch(part, tick));
         if (curve.xs.Count == 0)
         {
             Log.Information("PitchAudioApplier: no PITD curve points generated for selected notes.");
@@ -703,12 +705,17 @@ public static class PitchAudioApplier
     /// Build a PITD curve from the extracted RMVPE result aligned to the given note segments.
     /// Replicates the logic from RmvpeResult.ApplyToPart's internal processing.
     /// </summary>
+    /// <param name="basePitchAtTick">
+    /// Optional sampler returning the part's base pitch (in cents, before the PITD deviation) at an
+    /// absolute tick, so the applied curve reproduces the extracted pitch exactly.
+    /// </param>
     static UCurve BuildPitdCurve(
         RmvpeResult result,
         UProject project,
         UVoicePart part,
         List<NoteSegmentData> notes,
-        UExpressionDescriptor descriptor)
+        UExpressionDescriptor descriptor,
+        Func<int, double?>? basePitchAtTick = null)
     {
         const double MaxEdgeTrimMs = 25.0;
         const double MaxEdgeTrimRatio = 0.15;
@@ -763,7 +770,10 @@ public static class PitchAudioApplier
 
             var tick = project.timeAxis.MsPosToTickPos(absoluteTimeMs);
             var x = tick - part.position;
-            var y = (int)Math.Round(Math.Clamp((midiPitch - note.Midi) * 100.0, descriptor.min, descriptor.max));
+            // Subtract the renderer's base pitch (note pitch points, vibrato, mod plus) so the final
+            // pitch equals the extracted pitch. No clamp to the descriptor range on purpose.
+            double basePitch = basePitchAtTick?.Invoke(tick) ?? note.Midi * 100.0;
+            var y = (int)Math.Round(midiPitch * 100.0 - basePitch);
             var snappedX = (int)Math.Round((double)x / UCurve.interval) * UCurve.interval;
 
             pendingNoteIndex = noteIndex;

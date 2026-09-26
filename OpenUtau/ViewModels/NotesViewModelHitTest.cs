@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Media.TextFormatting;
 using OpenUtau.App.Controls;
 using OpenUtau.Core;
+using OpenUtau.Core.Render;
 using OpenUtau.Core.Ustx;
 using OpenUtau.Core.Util;
 
@@ -237,7 +238,31 @@ namespace OpenUtau.App.ViewModels {
             return default;
         }
 
+        /// <summary>
+        /// Base pitch (in cents) that the renderer uses right before the PITD deviation curve is
+        /// added: notes' pitch control points, vibrato and mod plus included.
+        /// This mirrors RenderPhrase.pitchesBeforeDeviation, so drawing the curve at a given tone
+        /// makes the rendered pitch land exactly on that tone (instead of being shifted by the
+        /// note's portamento or by mod plus).
+        /// Falls back to the notes' pitch points when no render phrase is available.
+        /// </summary>
         public double? SamplePitch(Point point) {
+            if (viewModel.Part == null) {
+                return null;
+            }
+            int tick = viewModel.PointToTick(point);
+            var rendered = RenderPhrase.SampleBasePitch(viewModel.Part, tick + viewModel.Part.position);
+            if (rendered != null) {
+                return rendered;
+            }
+            return SampleNotePitch(point);
+        }
+
+        /// <summary>
+        /// Pitch (in cents) taken from the notes' pitch control points only. Ignores vibrato and
+        /// mod plus, so it is only a fallback for <see cref="SamplePitch"/>.
+        /// </summary>
+        public double? SampleNotePitch(Point point) {
             if (viewModel.Part == null) {
                 return null;
             }
@@ -265,7 +290,10 @@ namespace OpenUtau.App.ViewModels {
                 return null;
             }
             double tick = viewModel.PointToTick(point);
-            var phrase = viewModel.Part.renderPhrases.FirstOrDefault(p => p.end >= tick);
+            // Render phrase positions are absolute (part.position + ...), while PointToTick is
+            // relative to the part start.
+            double absTick = tick + viewModel.Part.position;
+            var phrase = viewModel.Part.renderPhrases.FirstOrDefault(p => p.end >= absTick);
             if (phrase == null) {
                 phrase = viewModel.Part.renderPhrases.Last();
             }
@@ -273,7 +301,7 @@ namespace OpenUtau.App.ViewModels {
                 return null;
             }
             var curve = phrase.pitchesBeforeDeviation;
-            var pitchIndex = (int)Math.Round((tick - phrase.position + phrase.leading) / 5);
+            var pitchIndex = (int)Math.Round((absTick - phrase.position + phrase.leading) / 5);
             pitchIndex = Math.Clamp(pitchIndex, 0, curve.Length - 1);
             return curve[pitchIndex];
         }

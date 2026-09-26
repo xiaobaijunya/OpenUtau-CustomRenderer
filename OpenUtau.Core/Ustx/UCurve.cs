@@ -117,48 +117,63 @@ namespace OpenUtau.Core.Ustx {
                 ys.RemoveRange(li, ri - li + 1);
             }
         }
+        /// <summary>
+        /// Drops points that the retained polyline already represents within the tolerance.
+        /// The old recursive Douglas-Peucker re-scanned a whole segment on every split, which is
+        /// O(n^2) in the worst case — a 8000 point brush curve took ~0.9s (2.7s for a zigzag) and
+        /// froze the piano roll right after a pitch stroke, because the brush adds a point every
+        /// 5 ticks. This is an incremental sleeve fit: for the current segment it keeps the range of
+        /// slopes through the segment start that stay within tolerance of every point seen so far, so
+        /// each point costs O(1). Tolerance is measured on the curve value (cents for a pitch curve),
+        /// which is what the curve represents.
+        /// </summary>
         public void Simplify() {
-            if (xs == null || xs.Count < 3) {
+            if (xs == null || ys == null || xs.Count < 3 || xs.Count != ys.Count) {
                 return;
             }
-            int first = 0;
-            int last = xs.Count - 1;
-            var toKeep = new List<int>() { first, last };
             double tolerance = Math.Min(1, (descriptor.max - descriptor.min) * 0.005);
-            Simplify(first, last, tolerance, toKeep);
-            toKeep.Sort();
-            var newXs = new List<int>();
-            var newYs = new List<int>();
-            foreach (int index in toKeep) {
-                newXs.Add(xs[index]);
-                newYs.Add(ys[index]);
+            // The scan is O(1) per point, the cap only guards against pathological input.
+            const int maxSegmentPoints = 65536;
+            int count = xs.Count;
+            var newXs = new List<int>(count) { xs[0] };
+            var newYs = new List<int>(count) { ys[0] };
+            int start = 0;
+            while (start < count - 1) {
+                int end = start + 1;
+                double lo = double.NegativeInfinity;
+                double hi = double.PositiveInfinity;
+                while (end < count - 1 && end - start < maxSegmentPoints) {
+                    int x0 = xs[start];
+                    int y0 = ys[start];
+                    // Point `end` becomes an interior point of the candidate chord start -> end + 1.
+                    double dx = xs[end] - x0;
+                    if (dx <= 0) {
+                        break;
+                    }
+                    double slope = (ys[end] - y0) / dx;
+                    double slack = tolerance / dx;
+                    lo = Math.Max(lo, slope - slack);
+                    hi = Math.Min(hi, slope + slack);
+                    if (lo > hi) {
+                        break;
+                    }
+                    // The candidate chord must itself be within tolerance of the interior points.
+                    double nextDx = xs[end + 1] - x0;
+                    if (nextDx <= 0) {
+                        break;
+                    }
+                    double nextSlope = (ys[end + 1] - y0) / nextDx;
+                    if (nextSlope < lo || nextSlope > hi) {
+                        break;
+                    }
+                    end++;
+                }
+                newXs.Add(xs[end]);
+                newYs.Add(ys[end]);
+                start = end;
             }
             xs = newXs;
             ys = newYs;
-        }
-
-        public void Simplify(int first, int last, double tolerance, List<int> toKeep) {
-            double maxHeight = 0;
-            int maxHeightIdx = 0;
-            for (int index = first; index < last; index++) {
-                double height = PerpendicularDistance(
-                    xs[first], ys[first], xs[last], ys[last], xs[index], ys[index]);
-                if (height > maxHeight) {
-                    maxHeight = height;
-                    maxHeightIdx = index;
-                }
-            }
-            if (maxHeight > tolerance && maxHeightIdx != 0) {
-                toKeep.Add(maxHeightIdx);
-                Simplify(first, maxHeightIdx, tolerance, toKeep);
-                Simplify(maxHeightIdx, last, tolerance, toKeep);
-            }
-        }
-
-        private double PerpendicularDistance(int x, int y, int x1, int y1, int x2, int y2) {
-            double area = 0.5 * Math.Abs(x1 * (y2 - y) + x2 * (y - y1) + x * (y1 - y2));
-            double bottom = Math.Sqrt(Math.Pow(x1 - x2, 2) + Math.Pow(y1 - y2, 2));
-            return area / bottom * 2;
         }
         public static List<UCurve> MergeCurves(params List<UCurve>[] merging) {
             var merged = new Dictionary<UExpressionDescriptor, UCurve>();

@@ -20,6 +20,12 @@ namespace OpenUtau.Core {
         public UPart Part;
         public bool SkipPhonemizer;
         public bool SkipPhoneme;
+        /// <summary>
+        /// Keeps the existing render phrases and only re-applies the pitch deviation curve.
+        /// Only valid for edits that cannot change the phrase layout (e.g. editing the PITD curve),
+        /// because the phrase geometry (notes, phonemes, leading) is not recomputed.
+        /// </summary>
+        public bool SkipRenderPhrase;
     }
 
     public class DocManager : SingletonBase<DocManager> {

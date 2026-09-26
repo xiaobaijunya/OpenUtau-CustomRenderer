@@ -323,6 +323,9 @@ namespace OpenUtau.Core {
                 Part = Part,
                 SkipPhonemizer = true,
                 SkipPhoneme = true,
+                // The pitch deviation curve only shifts the rendered pitch, so the existing render
+                // phrases can refresh their pitch array instead of being rebuilt on every pointer move.
+                SkipRenderPhrase = abbr == Format.Ustx.PITD,
             };
         public SetCurveCommand(UProject project, UVoicePart part, string abbr, int x, int y, int lastX, int lastY) : base(part) {
             this.project = project;
@@ -343,8 +346,10 @@ namespace OpenUtau.Core {
                     curve = new UCurve(descriptor);
                     Part.curves.Add(curve);
                 }
-                int y1 = (int)Math.Clamp(y, descriptor.min, descriptor.max);
-                int lastY1 = (int)Math.Clamp(lastY, descriptor.min, descriptor.max);
+                // PITD is a pitch curve, not a bounded parameter: the renderer reads the final pitch
+                // line and ignores the descriptor range, so do not clamp it to the expression panel range.
+                int y1 = abbr == Format.Ustx.PITD ? y : (int)Math.Clamp(y, descriptor.min, descriptor.max);
+                int lastY1 = abbr == Format.Ustx.PITD ? lastY : (int)Math.Clamp(lastY, descriptor.min, descriptor.max);
                 curve.Set(x, y1, lastX, lastY1);
             }
         }
@@ -394,6 +399,14 @@ namespace OpenUtau.Core {
             this.newYs = newYs;
             this.setReal = setReal;
         }
+        public override ValidateOptions ValidateOptions
+            => new ValidateOptions {
+                SkipTiming = true,
+                Part = Part,
+                SkipPhonemizer = true,
+                SkipPhoneme = true,
+                SkipRenderPhrase = abbr == Format.Ustx.PITD,
+            };
         public override string ToString() => "Edit Curve";
         public override void Execute() {
             var curve = Part.curves.FirstOrDefault(c => c.abbr == abbr);
@@ -454,6 +467,14 @@ namespace OpenUtau.Core {
             oldXs = curve?.xs.ToArray();
             oldYs = curve?.ys.ToArray();
         }
+        public override ValidateOptions ValidateOptions
+            => new ValidateOptions {
+                SkipTiming = true,
+                Part = Part,
+                SkipPhonemizer = true,
+                SkipPhoneme = true,
+                SkipRenderPhrase = abbr == Format.Ustx.PITD,
+            };
         public override string ToString() => "Edit Curve";
         public override void Execute() {
             var curve = Part.curves.FirstOrDefault(c => c.abbr == abbr);
@@ -470,7 +491,11 @@ namespace OpenUtau.Core {
                 ys.Insert(0, curve.Sample(xs[0]));
                 xs.Add(xs.Last() + UCurve.interval);
                 ys.Add(curve.Sample(xs.Last()));
-                ys = ys.Select(y => (int)Math.Clamp(y, descriptor.min, descriptor.max)).ToList();
+                // PITD is a pitch curve read directly by the renderer, so keep it out of the
+                // expression panel's value range.
+                if (abbr != Format.Ustx.PITD) {
+                    ys = ys.Select(y => (int)Math.Clamp(y, descriptor.min, descriptor.max)).ToList();
+                }
 
                 curve.Set(xs.First(), ys.First(), xs.First(), ys.First());
                 curve.Set(xs.Last(), ys.Last(), xs.Last(), ys.Last());

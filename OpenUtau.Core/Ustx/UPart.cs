@@ -269,9 +269,19 @@ namespace OpenUtau.Core.Ustx {
                     phoneme.Validate(options, project, track, this, note);
                 }
             }
-            renderPhrases.Clear();
-            if (PhonemesUpToDate) {
-                renderPhrases.AddRange(RenderPhrase.FromPart(project, track, this));
+            if (options.SkipRenderPhrase) {
+                // Editing the PITD curve cannot change the phrase layout, so rebuilding every
+                // phrase (time axis clone, expression sampling, hashing) is pure waste. The render
+                // phrases only need to re-apply the deviation curve on top of their base pitch.
+                // This is the hot path while dragging the pitch brush.
+                foreach (var phrase in renderPhrases) {
+                    phrase.RefreshPitches(this);
+                }
+            } else {
+                renderPhrases.Clear();
+                if (PhonemesUpToDate) {
+                    renderPhrases.AddRange(RenderPhrase.FromPart(project, track, this));
+                }
             }
         }
 

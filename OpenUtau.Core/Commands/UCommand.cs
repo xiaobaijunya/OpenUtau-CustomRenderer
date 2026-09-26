@@ -51,7 +51,8 @@ namespace OpenUtau.Core {
                 if (other.SkipTiming != options.SkipTiming
                     || !ReferenceEquals(other.Part, options.Part)
                     || other.SkipPhonemizer != options.SkipPhonemizer
-                    || other.SkipPhoneme != options.SkipPhoneme) {
+                    || other.SkipPhoneme != options.SkipPhoneme
+                    || other.SkipRenderPhrase != options.SkipRenderPhrase) {
                     return default;
                 }
             }

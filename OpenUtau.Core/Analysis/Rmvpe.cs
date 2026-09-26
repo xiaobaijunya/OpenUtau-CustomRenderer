@@ -124,10 +124,23 @@ public class RmvpeResult {
     }
 
     public void ApplyToPart(UProject project, UVoicePart part, double offsetMs = 0) {
-        ApplyToPart(project, part, BuildSegments(project, part), offsetMs);
+        ApplyToPart(project, part, BuildSegments(project, part), offsetMs, null);
     }
 
-    void ApplyToPart(UProject project, UVoicePart part, IReadOnlyList<NoteSegment> notes, double offsetMs) {
+    /// <summary>
+    /// Applies the extracted pitch as a PITD curve.
+    /// </summary>
+    /// <param name="basePitchAtTick">
+    /// Optional sampler returning the part's base pitch (in cents, before the PITD deviation) at an
+    /// absolute tick. When provided, the deviation is computed as
+    /// <c>extractedPitch - basePitch</c>, so the rendered result is exactly the extracted pitch
+    /// instead of being shifted by the note's portamento/vibrato/mod plus.
+    /// </param>
+    public void ApplyToPart(UProject project, UVoicePart part, double offsetMs, Func<int, double?>? basePitchAtTick) {
+        ApplyToPart(project, part, BuildSegments(project, part), offsetMs, basePitchAtTick);
+    }
+
+    void ApplyToPart(UProject project, UVoicePart part, IReadOnlyList<NoteSegment> notes, double offsetMs, Func<int, double?>? basePitchAtTick) {
         if (MidiPitch.Length == 0 || notes.Count == 0 || !project.expressions.TryGetValue(Format.Ustx.PITD, out var descriptor)) {
             Log.Information(
                 "RMVPE apply skipped. pitch={PitchCount} notes={NoteCount} hasPITD={HasPitd}",
@@ -170,7 +183,13 @@ public class RmvpeResult {
             }
             var tick = project.timeAxis.MsPosToTickPos(absoluteTimeMs);
             var x = tick - part.position;
-            var y = (int)Math.Round(Math.Clamp((midiPitch - note.midi) * 100.0, descriptor.min, descriptor.max));
+            // The renderer adds the PITD curve on top of the base pitch (note pitch points, vibrato,
+            // mod plus). Subtracting that base pitch reproduces the extracted pitch exactly; using the
+            // note tone instead would leak the portamento and mod plus into the result.
+            double basePitch = basePitchAtTick?.Invoke(tick) ?? note.midi * 100.0;
+            // No clamp to the descriptor range on purpose: the renderer reads the final pitch line
+            // directly and the expression panel range must not limit the applied pitch.
+            var y = (int)Math.Round(midiPitch * 100.0 - basePitch);
             var snappedX = (int)Math.Round((double)x / UCurve.interval) * UCurve.interval;
             pendingNoteIndex = noteIndex;
             if (pendingPoints.Count > 0 && pendingPoints[^1].x == snappedX) {

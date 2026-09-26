@@ -192,8 +192,10 @@ namespace OpenUtau.Core.Render {
         public readonly RenderNote[] notes;
         public readonly RenderPhone[] phones;
 
-        public readonly float[] pitches;
         public readonly float[] pitchesBeforeDeviation;
+        // Not readonly: RefreshPitches() swaps in a freshly built array after a pitch curve edit so
+        // background render threads always observe a fully written array.
+        public float[] pitches;
         public readonly float[] dynamics;
         public readonly float[] gender;
         public readonly float[] breathiness;
@@ -207,7 +209,9 @@ namespace OpenUtau.Core.Render {
         public readonly float[] breathHigh;
         public readonly Tuple<string, float[]>[] curves;//custom curves defined by renderer
         public readonly ulong preEffectHash;
-        public readonly ulong hash;
+        // Not readonly: RefreshPitches() updates it after a pitch curve edit so the render cache
+        // and the pitch line drawn in the piano roll follow the change without a full rebuild.
+        public ulong hash;
 
         internal readonly IRenderer renderer;
         public readonly string wavtool;
@@ -535,6 +539,51 @@ namespace OpenUtau.Core.Render {
             this.curves = curves.ToArray();
             preEffectHash = Hash(false);
             hash = Hash(true);
+        }
+
+        /// <summary>
+        /// Re-applies the PITD deviation curve on top of <see cref="pitchesBeforeDeviation"/> and
+        /// updates <see cref="hash"/> so the render cache is invalidated.
+        /// Used while editing the pitch curve: it is orders of magnitude cheaper than rebuilding the
+        /// phrase, and the phrase geometry (notes, phonemes, leading) is unchanged by such edits.
+        /// </summary>
+        public void RefreshPitches(UVoicePart part) {
+            if (pitches == null || pitchesBeforeDeviation == null ||
+                pitches.Length != pitchesBeforeDeviation.Length) {
+                return;
+            }
+            var refreshed = new float[pitchesBeforeDeviation.Length];
+            Array.Copy(pitchesBeforeDeviation, refreshed, refreshed.Length);
+            const int pitchInterval = 5;
+            int pitchStart = position - part.position - leading;
+            var pitchCurve = part.curves.FirstOrDefault(c => c.abbr == Format.Ustx.PITD);
+            if (pitchCurve != null && !pitchCurve.IsEmpty) {
+                for (int i = 0; i < refreshed.Length; ++i) {
+                    refreshed[i] += pitchCurve.Sample(pitchStart + i * pitchInterval);
+                }
+            }
+            pitches = refreshed;
+            hash = Hash(true);
+        }
+
+        /// <summary>
+        /// Samples the base pitch (in cents) of a part at an absolute tick, i.e. the pitch the
+        /// renderer uses right before the PITD deviation is added. Returns null when no render
+        /// phrase covers the tick.
+        /// </summary>
+        public static double? SampleBasePitch(UVoicePart part, int absTick) {
+            var phrases = part?.renderPhrases;
+            if (phrases == null || phrases.Count == 0) {
+                return null;
+            }
+            var phrase = phrases.FirstOrDefault(p => p.end >= absTick) ?? phrases.Last();
+            if (phrase == null || phrase.pitchesBeforeDeviation.Length == 0) {
+                return null;
+            }
+            const int pitchInterval = 5;
+            int pitchIndex = (int)Math.Round((absTick - phrase.position + phrase.leading) / (double)pitchInterval);
+            pitchIndex = Math.Clamp(pitchIndex, 0, phrase.pitchesBeforeDeviation.Length - 1);
+            return phrase.pitchesBeforeDeviation[pitchIndex];
         }
 
         private static float[] SampleCurve(UCurve curve, int start, int length, Func<float, UCurve, float> convert) {
