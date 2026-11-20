@@ -25,6 +25,12 @@ namespace OpenUtau.Classic {
         public List<OtoSet> OtoSets = new List<OtoSet>();
         public List<Subbank> Subbanks = new List<Subbank>();
         public string Id;
+        /// <summary>
+        /// 同名声库位于不同根目录时加在 Id 后的唯一性后缀（例如 " (voice)"）。
+        /// Reload() 会通过 VoicebankLoader.LoadInfo 重新计算 Id，这个后缀必须保留，
+        /// 否则重新加载后两个声库的 Id 又撞在一起，列表里只会剩一个。
+        /// </summary>
+        public string IdSuffix = string.Empty;
         public bool? UseFilenameAsAlias = null;
 
         public void Reload() {

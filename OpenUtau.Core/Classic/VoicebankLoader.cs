@@ -158,7 +158,8 @@ namespace OpenUtau.Classic {
                     }
                 }
                 voicebank.OtherInfo = string.Join("\n", otherLines);
-                voicebank.Id = Path.GetRelativePath(basePath, Path.GetDirectoryName(voicebank.File));
+                voicebank.Id = Path.GetRelativePath(basePath, Path.GetDirectoryName(voicebank.File))
+                    + (voicebank.IdSuffix ?? string.Empty);
                 if (string.IsNullOrEmpty(voicebank.Name)) {
                     voicebank.Name = $"No Name ({voicebank.Id})";
                 }

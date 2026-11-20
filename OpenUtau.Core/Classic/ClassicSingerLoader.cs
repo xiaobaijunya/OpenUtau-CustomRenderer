@@ -33,7 +33,11 @@ namespace OpenUtau.Classic {
                     string id = voicebank.Id ?? string.Empty;
                     if (usedIds.TryGetValue(id, out var usedLocation)
                         && !string.Equals(usedLocation, location, StringComparison.OrdinalIgnoreCase)) {
-                        id = MakeUniqueId(id, path, usedIds);
+                        string baseId = id;
+                        id = MakeUniqueId(baseId, path, usedIds);
+                        // 后缀记在 Voicebank 上：Reload() 重新计算 Id 时会再拼回来，
+                        // 否则重新加载后 Id 又会撞车，歌手列表里就只剩一个。
+                        voicebank.IdSuffix = id.Substring(baseId.Length);
                         voicebank.Id = id;
                     }
                     usedIds[id] = location;
