@@ -1280,7 +1280,11 @@ namespace OpenUtau.App.ViewModels {
                     MessageBus.Current.SendMessage(new RealCurveRefreshEvent());
                 } else if (notif is RealCurveCoverageNotification && notif.part == Part) {
                     MessageBus.Current.SendMessage(new RealCurveRefreshEvent());
-                }
+                } else if (notif is PartRenderedNotification && notif.part == Part) {
+                        // 每渲染完一句就发一次刷新事件（波形控件内部按 50ms 合并重绘），
+                        // 自定义渲染引擎同样走这条路，不依赖 RenderView 投影。
+                        MessageBus.Current.SendMessage(new WaveformRefreshEvent());
+                    }
             } else if (cmd is PartCommand partCommand) {
                 if (cmd is ReplacePartCommand replacePart) {
                     if (!isUndo) {

@@ -224,6 +224,13 @@ namespace OpenUtau.Core.CustomRender {
             if (requests.Length == 0 || cancellation.IsCancellationRequested) {
                 return;
             }
+            foreach (var req in requests) {
+                // 每轮渲染开始时重置该 part 的乐句进度块，渲染过程中逐句点亮。
+                if (req.phrases.Length > 0) {
+                    var part = req.part;
+                    DocManager.Inst.PostOnUIThread(() => DocManager.Inst.ExecuteCmd(new RebuildPhraseBlocksNotification(part)));
+                }
+            }
             var tuples = requests
                 .SelectMany(req => req.phrases
                     .Zip(req.sources, (phrase, source) => Tuple.Create(phrase, source, req)))
@@ -273,7 +280,7 @@ namespace OpenUtau.Core.CustomRender {
                     var (index, result) = await completed.ConfigureAwait(false);
                     sources[index].SetSamples(result.samples);
                     if (!cancellation.IsCancellationRequested) {
-                        PublishPhraseResult(tuples[index].Item3, sources, index, result);
+                        PublishPhraseResult(tuples[index].Item3, tuples[index].Item1, sources, index, result);
                     }
                 }
             } else {
@@ -317,7 +324,7 @@ namespace OpenUtau.Core.CustomRender {
 
                 var results = await Task.WhenAll(tasks).ConfigureAwait(false);
                 foreach (var (index, result) in results) {
-                    PublishPhraseResult(tuples[index].Item3, sources, index, result);
+                    PublishPhraseResult(tuples[index].Item3, tuples[index].Item1, sources, index, result);
                 }
             }
             progress.Clear();
@@ -326,11 +333,13 @@ namespace OpenUtau.Core.CustomRender {
         /// <summary>
         /// 单个 phrase 渲染完成后的公共处理：写入采样、按需更新 part.Mix、通知刷新。
         /// </summary>
-        private static void PublishPhraseResult(RenderPartRequest request, WaveSource[] sources, int index, RenderResult result) {
+        private static void PublishPhraseResult(RenderPartRequest request, RenderPhrase phrase, WaveSource[] sources, int index, RenderResult result) {
             sources[index].SetSamples(result.samples);
             if (request.ShouldPublishMix()) {
                 request.part.SetMix(request.mix);
             }
+            // 逐句点亮编曲区的渲染进度块。
+            DocManager.Inst.ExecuteCmd(new PhraseRenderStateNotification(request.part, phrase, true));
             DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));
             // 合并后的波形刷新：与内置 RenderEngine 一致，走 10Hz 节流的 WaveformReadyNotification。
             WaveformRefresh.Request();

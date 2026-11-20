@@ -2,6 +2,9 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Threading;
+using ReactiveUI;
+using ReactiveUI.Primitives;
 using OpenUtau.App.ViewModels;
 using OpenUtau.Core;
 using OpenUtau.Core.Ustx;
@@ -50,15 +53,33 @@ namespace OpenUtau.App.Controls {
         private double tickOffset;
         private bool showWaveform;
 
+        private readonly DispatcherTimer refreshTimer;
         private readonly WaveformEnvelope envelope = new WaveformEnvelope();
         private float[] sampleData = new float[0];
 
         public WaveformImage() {
-            // The projection payload is not read here; deliveries mean new audio.
+            // 渲染过程中每个片段完成都会触发一次刷新，合并为 50ms 一次，
+            // 避免播放/预渲染时反复全量重画波形。
+            refreshTimer = new DispatcherTimer(
+                TimeSpan.FromMilliseconds(50),
+                DispatcherPriority.Background,
+                RefreshTimer_Tick);
+            MessageBus.Current.Listen<WaveformRefreshEvent>()
+                .Subscribe(e => {
+                    refreshTimer.Stop();
+                    refreshTimer.Start();
+                });
+            // 内置引擎走 RenderView 投影刷新。
             OpenUtau.Core.Render.RenderView.Inst.Observe(_ => {
                 envelope.Invalidate();
                 InvalidateVisual();
             });
+        }
+
+        private void RefreshTimer_Tick(object? sender, EventArgs e) {
+            refreshTimer.Stop();
+            envelope.Invalidate();
+            InvalidateVisual();
         }
 
 
