@@ -143,6 +143,7 @@ jobs:
       # Test
       - name: Test
         run: dotnet run --project OpenUtau.Test/OpenUtau.Test.csproj
+        timeout-minutes: 30
 
       # Build
       - name: Restore
@@ -212,42 +213,44 @@ jobs:
         with:
           name: OpenUtau-${{ matrix.arch.name }}
           path: bin/${{ matrix.arch.name }}/
-        if: ${{ !inputs.release }}
+        if: ${{ needs.next-version.outputs.release != 'true' }}
 
       # Appcast
+      # Windows 上用 cmd：PowerShell 会把 -v=0.0.11 这类参数拆开传给 python。
       - name: Appcast
+        shell: cmd
         run: |
-          python appcast.py -v=${{ inputs.version }} -o=windows -r=${{ matrix.arch.name }} -f=OpenUtau-${{ matrix.arch.name }}.zip
-        if: ${{ inputs.release && matrix.arch.os == 'win' }}
+          python appcast.py -v=${{ needs.next-version.outputs.version }} --tag=${{ needs.next-version.outputs.tag }} -o=windows -r=${{ matrix.arch.name }} -f=OpenUtau-${{ matrix.arch.name }}.zip
+        if: ${{ needs.next-version.outputs.release == 'true' && matrix.arch.os == 'win' }}
 
       - name: Appcast macOS
         run: |
-          python appcast.py -v=${{ inputs.version }} -o=macos -r=${{ matrix.arch.name }} -f=OpenUtau-${{ matrix.arch.name }}.zip
-        if: ${{ inputs.release && matrix.arch.os == 'osx' }}
+          python appcast.py -v=${{ needs.next-version.outputs.version }} --tag=${{ needs.next-version.outputs.tag }} -o=macos -r=${{ matrix.arch.name }} -f=OpenUtau-${{ matrix.arch.name }}.zip
+        if: ${{ needs.next-version.outputs.release == 'true' && matrix.arch.os == 'osx' }}
 
       - name: Appcast Linux
         run: |
-          python appcast.py -v=${{ inputs.version }} -o=linux -r=${{ matrix.arch.name }} -f=OpenUtau-${{ matrix.arch.name }}.zip
-        if: ${{ inputs.release && matrix.arch.os == 'linux' }}
+          python appcast.py -v=${{ needs.next-version.outputs.version }} --tag=${{ needs.next-version.outputs.tag }} -o=linux -r=${{ matrix.arch.name }} -f=OpenUtau-${{ matrix.arch.name }}.zip
+        if: ${{ needs.next-version.outputs.release == 'true' && matrix.arch.os == 'linux' }}
 
       # Create Zip for Release
       - name: Create Zip (Windows)
         run: |
           cd bin/${{ matrix.arch.name }}
           7z a ../../OpenUtau-${{ matrix.arch.name }}.zip *
-        if: ${{ inputs.release && matrix.arch.os == 'win' }}
+        if: ${{ needs.next-version.outputs.release == 'true' && matrix.arch.os == 'win' }}
 
       - name: Create Zip (Linux/macOS)
         run: |
           cd bin/${{ matrix.arch.name }}
           zip -r ../../OpenUtau-${{ matrix.arch.name }}.zip *
-        if: ${{ inputs.release && matrix.arch.os != 'win' }}
+        if: ${{ needs.next-version.outputs.release == 'true' && matrix.arch.os != 'win' }}
 
       # Generate release changelog
       - name: Generate release changelog
         shell: pwsh
         run: |
-          $currentVersion = "${{ inputs.version }}"
+          $currentVersion = "${{ needs.next-version.outputs.version }}"
           $repo = "stakira/OpenUtau"
 
           # Find previous version tag
@@ -293,12 +296,12 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.version }}
-          name: ${{ env.release-name }}
-          prerelease: ${{ inputs.beta }}
-          draft: ${{ inputs.draft }}
+          tag_name: ${{ needs.next-version.outputs.tag }}
+          name: ${{ needs.next-version.outputs.name }}
+          prerelease: ${{ needs.next-version.outputs.channel != 'stable' }}
+          draft: ${{ needs.next-version.outputs.draft == 'true' }}
           body_path: release_body.md
           files: |
             appcast.${{ matrix.arch.name }}*.xml
             OpenUtau-${{ matrix.arch.name }}.zip
-        if: ${{ inputs.release }}
+        if: ${{ needs.next-version.outputs.release == 'true' }}
