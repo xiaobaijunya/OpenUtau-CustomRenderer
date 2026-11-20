@@ -327,6 +327,14 @@ namespace OpenUtau.Core.CustomRender {
                     PublishPhraseResult(tuples[index].Item3, tuples[index].Item1, sources, index, result);
                 }
             }
+            foreach (var request in requests) {
+                // 整段都渲染完了：登记完成标记（DAW 取音、缓存判断会用到）。
+                if (request.sources != null && request.sources.Length > 0 &&
+                    request.sources.All(source => source.HasSamples)) {
+                    PlaybackManager.Inst.MixPlanner.MarkPartComplete(
+                        request.part, request.phrases.Select(phrase => phrase.hash));
+                }
+            }
             progress.Clear();
         }
 
@@ -335,6 +343,11 @@ namespace OpenUtau.Core.CustomRender {
         /// </summary>
         private static void PublishPhraseResult(RenderPartRequest request, RenderPhrase phrase, WaveSource[] sources, int index, RenderResult result) {
             sources[index].SetSamples(result.samples);
+            // 把这一句的 PCM 登记到 MixPlanner：波形按句渐进显示，而且跨 pass 保留，
+            // 从播放线开始播放时不会再把前面已经渲染好的音频丢掉。
+            PlaybackManager.Inst.MixPlanner.RegisterPcm(
+                request.part, phrase.hash,
+                sources[index].offsetMs, sources[index].estimatedLengthMs, 1, result.samples);
             if (request.ShouldPublishMix()) {
                 request.part.SetMix(request.mix);
             }
