@@ -56,6 +56,10 @@ namespace OpenUtau.Core.Render {
         public static string GetDefaultRenderer(USingerType singerType) {
             if (singerType == USingerType.Classic) {
                 var defaultRenderer = Preferences.Default.DefaultRenderer;
+                if (string.IsNullOrEmpty(defaultRenderer)) {
+                    // 本分支的默认：古典歌手一律用自定义服务器引擎。
+                    return CUSTOM_SERVER;
+                }
                 if (classicRenderers.Contains(defaultRenderer)) {
                     return defaultRenderer;
                 }

@@ -23,6 +23,10 @@ namespace OpenUtau.Core.HiFiUtau {
             if (project == null || project.parts == null) {
                 return false;
             }
+            // 同上：优先看轨道设置里已解析的渲染器实例。
+            if (project.tracks.Any(track => track.RendererSettings?.Renderer is HifiUtauServerRenderer)) {
+                return true;
+            }
             return project.parts
                 .Where(part => part is UVoicePart)
                 .Cast<UVoicePart>()
@@ -176,13 +180,22 @@ namespace OpenUtau.Core.HiFiUtau {
         }
 
         private RenderPartRequest[] PrepareRequests() {
-            RenderPartRequest[] requests;
-            SingerManager.Inst.ReleaseSingersNotInUse(project);
+            UVoicePart[] parts;
             lock (project) {
-                requests = project.parts
+                parts = project.parts
                     .Where(part => part is UVoicePart && (trackNo == -1 || part.trackNo == trackNo))
                     .Where(part => !Preferences.Default.SkipRenderingMutedTracks || !project.tracks[part.trackNo].Muted)
                     .Select(part => part as UVoicePart)
+                    .ToArray();
+            }
+            // 上游的乐句改为异步构建（Pipeline.PhraseSource），必须等最新一次构建落地，
+            // 否则这里拿到的是旧乐句或空数组，播放/预渲染会没有声音。
+            foreach (var part in parts) {
+                part.WaitPhraseSource(TimeSpan.FromSeconds(10));
+            }
+            RenderPartRequest[] requests;
+            lock (project) {
+                requests = parts
                     .Select(part => part.GetRenderRequest())
                     .Where(request => request != null)
                     .ToArray();

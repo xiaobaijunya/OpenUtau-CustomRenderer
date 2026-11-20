@@ -17,6 +17,11 @@ namespace OpenUtau.Core.CustomRender {
                 return false;
             }
             
+            // 轨道设置里的渲染器实例是同步解析出来的，先按它判断；乐句是异步构建的，
+            // 只靠乐句快照会在构建完成前误判成“不用自定义引擎”。
+            if (project.tracks.Any(track => track.RendererSettings?.Renderer is CustomServerRenderer)) {
+                return true;
+            }
             return project.parts
                 .Where(part => part is UVoicePart)
                 .Cast<UVoicePart>()
@@ -173,13 +178,22 @@ namespace OpenUtau.Core.CustomRender {
         }
 
         private RenderPartRequest[] PrepareRequests() {
-            RenderPartRequest[] requests;
-            SingerManager.Inst.ReleaseSingersNotInUse(project);
+            UVoicePart[] parts;
             lock (project) {
-                requests = project.parts
+                parts = project.parts
                     .Where(part => part is UVoicePart && (trackNo == -1 || part.trackNo == trackNo))
                     .Where(part => !Preferences.Default.SkipRenderingMutedTracks || !project.tracks[part.trackNo].Muted)
                     .Select(part => part as UVoicePart)
+                    .ToArray();
+            }
+            // 上游的乐句改为异步构建（Pipeline.PhraseSource），必须等最新一次构建落地，
+            // 否则这里拿到的是旧乐句或空数组，播放/预渲染会没有声音。
+            foreach (var part in parts) {
+                part.WaitPhraseSource(TimeSpan.FromSeconds(10));
+            }
+            RenderPartRequest[] requests;
+            lock (project) {
+                requests = parts
                     .Select(part => part.GetRenderRequest())
                     .Where(request => request != null)
                     .ToArray();
