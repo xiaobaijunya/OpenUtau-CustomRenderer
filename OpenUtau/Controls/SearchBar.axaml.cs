@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using OpenUtau.App.ViewModels;
+using OpenUtau.Core;
 using OpenUtau.Core.Ustx;
 
 namespace OpenUtau.App.Controls {
@@ -18,6 +19,7 @@ namespace OpenUtau.App.Controls {
         }
 
         public void Show(NotesViewModel notesViewModel) {
+            Unsubscribe();
             viewModel = new SearchNoteViewModel(notesViewModel);
             DataContext = viewModel;
             viewModel.NoteMode = noteMode;
@@ -50,15 +52,28 @@ namespace OpenUtau.App.Controls {
         }
 
         public void OnClose(object sender, RoutedEventArgs args) {
+            Hide();
+        }
+
+        void Hide() {
             IsVisible = false;
             if (viewModel != null) {
                 noteMode = viewModel.NoteMode;
                 // Leave any phoneme edit scope the search set, so later edits are not restricted.
                 viewModel.ClearPhonemeEditFilter();
             }
+            Unsubscribe();
         }
 
-        private void Box_GotFocus(object? sender, GotFocusEventArgs e) {
+        // Each Show() creates a new view model that subscribes to DocManager;
+        // a hidden one must stop reacting to part loads.
+        void Unsubscribe() {
+            if (viewModel != null) {
+                DocManager.Inst.RemoveSubscriber(viewModel);
+            }
+        }
+
+        private void Box_GotFocus(object? sender, FocusChangedEventArgs e) {
             box.SelectAll();
         }
 
@@ -83,6 +98,7 @@ namespace OpenUtau.App.Controls {
                     if (DataContext is SearchNoteViewModel vm) {
                         vm.ClearPhonemeEditFilter();
                     }
+                    Hide();
                     e.Handled = true;
                     break;
                 default:

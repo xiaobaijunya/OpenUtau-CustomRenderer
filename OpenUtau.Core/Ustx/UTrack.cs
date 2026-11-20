@@ -23,10 +23,12 @@ namespace OpenUtau.Core.Ustx {
         public void Validate(UTrack track) {
             if (track.Singer == null || !track.Singer.Found) {
                 renderer = null;
-                Renderer = null;
                 resampler = null;
-                Resampler = null;
                 wavtool = null;
+            }
+            if (Render.SineRenderer.IsFallbackActive(track)) {
+                Renderer = Render.SineRenderer.RendererFor(track);
+                Resampler = null;
                 Wavtool = null;
                 return;
             }
@@ -34,7 +36,7 @@ namespace OpenUtau.Core.Ustx {
                 renderer = Renderers.GetDefaultRenderer(track.Singer.SingerType);
             }
             if (renderer != Renderer?.ToString()) {
-                Renderer = Renderers.CreateRenderer(renderer);
+                Renderer = Renderers.GetOrCreate(renderer);
             }
             if (renderer == Renderers.CUSTOM_SERVER) {
                 if (string.IsNullOrEmpty(serverUrl)) {
@@ -110,6 +112,7 @@ namespace OpenUtau.Core.Ustx {
                 if (singer_ != value) {
                     singer_ = value;
                     VoiceColorExp = null;
+                    VoiceColor2Exp = null;
                 }
             }
         }
@@ -121,11 +124,17 @@ namespace OpenUtau.Core.Ustx {
         [YamlIgnore] public bool Muted { set; get; }
         public bool Mute { get; set; }
         public bool Solo { get; set; }
+        // Per-track post-processing FX.  null = no FX configured (bypass).
+        // Backwards compatible: older ustx files simply load with this null.
+        public UMixFx MixFx { get; set; }
         public double Volume { set; get; }
         public double Pan { set; get; }
 
         public List<UExpressionDescriptor> TrackExpressions { get; set; } = new List<UExpressionDescriptor>();
+        /// <summary>The id of an expression graph overriding the project's default for this track's renderer.</summary>
+        public string? ExpressionGraph { get; set; }
         [YamlIgnore] public UExpressionDescriptor VoiceColorExp { set; get; }
+        [YamlIgnore] public UExpressionDescriptor VoiceColor2Exp { set; get; }
         public string[] VoiceColorNames { get; set; } = new string[] { "" };
 
         public UTrack() {
@@ -148,15 +157,17 @@ namespace OpenUtau.Core.Ustx {
             if (abbr == Format.Ustx.CLR && VoiceColorExp != null) {
                 descriptor = VoiceColorExp;
                 return true;
-            }
-            var trackExp = TrackExpressions.FirstOrDefault(e => e.abbr == abbr);
-            if (trackExp != null) {
-                descriptor = trackExp;
-                return true;
-            } else if (project.expressions.TryGetValue(abbr, out descriptor)) {
+            } else if (abbr == Format.Ustx.CLRY && VoiceColor2Exp != null) {
+                descriptor = VoiceColor2Exp;
                 return true;
             }
-            return false;
+            foreach (var trackExp in TrackExpressions) {
+                if (trackExp.abbr == abbr) {
+                    descriptor = trackExp;
+                    return true;
+                }
+            }
+            return project.expressions.TryGetValue(abbr, out descriptor);
         }
 
         public List<UExpressionDescriptor> GetSupportedExps(UProject project) {
@@ -179,22 +190,38 @@ namespace OpenUtau.Core.Ustx {
                 Singer = USinger.CreateMissing(Singer.Name);
             }
             VoiceColorExp = null;
+            VoiceColor2Exp = null;
         }
 
         public void Validate(ValidateOptions options, UProject project) {
             if (Singer != null && Singer.Found) {
                 Singer.EnsureLoaded();
             }
+            Pipeline.DocumentSnapshotStore.Inst.SetTrack(this);
             if (RendererSettings == null) {
                 RendererSettings = new URenderSettings();
             }
             RendererSettings.Validate(this);
             if (project.expressions.TryGetValue(Format.Ustx.CLR, out var descriptor)) {
                 if (VoiceColorExp == null && Singer != null && Singer.Found && Singer.Loaded) {
-                    VoiceColorExp = descriptor.Clone();
                     var colors = Singer.Subbanks.Select(subbank => subbank.Color).ToHashSet();
-                    VoiceColorExp.options = colors.OrderBy(c => c).ToArray();
-                    VoiceColorExp.max = VoiceColorExp.options.Length - 1;
+                    if (colors.Count > 0) {
+                        VoiceColorExp = descriptor.Clone();
+                        VoiceColorExp.options = colors.OrderBy(c => c).ToArray();
+                        VoiceColorExp.max = VoiceColorExp.options.Length - 1;
+                        VoiceColorExp.CustomDefaultValue = Math.Clamp(VoiceColorExp.CustomDefaultValue, VoiceColorExp.min, VoiceColorExp.max);
+                    }
+                }
+            }
+            if (project.expressions.TryGetValue(Format.Ustx.CLRY, out var descriptor2)) {
+                if (VoiceColor2Exp == null && Singer != null && Singer.Found && Singer.Loaded) {
+                    var colors = Singer.Subbanks.Select(subbank => subbank.Color).ToHashSet();
+                    if (colors.Count > 0) {
+                        VoiceColor2Exp = descriptor2.Clone();
+                        VoiceColor2Exp.options = colors.OrderBy(c => c).ToArray();
+                        VoiceColor2Exp.max = VoiceColor2Exp.options.Length - 1;
+                        VoiceColor2Exp.CustomDefaultValue = Math.Clamp(VoiceColor2Exp.CustomDefaultValue, VoiceColor2Exp.min, VoiceColor2Exp.max);
+                    }
                 }
             }
         }
@@ -226,7 +253,7 @@ namespace OpenUtau.Core.Ustx {
 
         public void BeforeSave() {
             singer = Singer?.Id;
-            phonemizer = Phonemizer.GetType().FullName;
+            phonemizer = Phonemizer.Id;
             if (Singer != null && Singer.Found && VoiceColorExp != null && VoiceColorExp.options.Length > 0) {
                 VoiceColorNames = VoiceColorExp.options.ToArray();
             } else {

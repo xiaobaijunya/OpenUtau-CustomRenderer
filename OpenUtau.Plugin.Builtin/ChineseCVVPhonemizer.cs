@@ -48,6 +48,7 @@ namespace OpenUtau.Plugin.Builtin {
         }
 
         public override void SetUp(Note[][] groups, UProject project, UTrack track) {
+            base.SetUp(groups, project, track);
             BaseChinesePhonemizer.RomanizeNotes(groups);
         }
 
@@ -65,7 +66,7 @@ namespace OpenUtau.Plugin.Builtin {
                     var endAttr = notes[0].phonemeAttributes?.FirstOrDefault(attr => attr.index == 0) ?? default;
                     string alias = $"{prevVowel} {ending}";
                     if (singer != null &&
-                        singer.TryGetMappedOto(alias, notes[0].tone + endAttr.toneShift, endAttr.voiceColor, out var endOto)) {
+                        singer.TryGetMappedOto(alias, notes[0].tone + (endAttr.toneShift ?? GetParentToneShift()), endAttr.voiceColor ?? GetParentVoiceColor(), out var endOto)) {
                         alias = endOto.Alias;
                     }
                     return new Result {

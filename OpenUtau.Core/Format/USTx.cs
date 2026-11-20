@@ -10,7 +10,7 @@ using Serilog;
 
 namespace OpenUtau.Core.Format {
     public class Ustx {
-        public static readonly Version kUstxVersion = new Version(0, 9);
+        public static readonly Version kUstxVersion = new Version(0, 10);
 
         public const string DYN = "dyn";
         public const string PITD = "pitd";
@@ -45,6 +45,11 @@ namespace OpenUtau.Core.Format {
         public const string STMS = "stms";
         public const string WARM = "warm";
         public const string HCMP = "hcmp";
+        public const string CLRY = "clry";
+        public const string XSY = "xsy";
+        public const string GRWC = "grwc";
+        public const string RPIT = "rpit";
+        public const string PITO = "pito";
 
         public static readonly string[] required = { DYN, PITD, CLR, ENG, VEL, VOL, ATK, DEC };
 
@@ -81,6 +86,13 @@ namespace OpenUtau.Core.Format {
             project.RegisterExpression(new UExpressionDescriptor("stretch mode", STRT, false, new string[] { "normal", "loop" }));
             project.RegisterExpression(new UExpressionDescriptor("splice mode", SPLC, false, new string[] { "model", "mel" }));
             project.RegisterExpression(new UExpressionDescriptor("stretch ms", STMS, -50, 50, 0, "S"));
+            project.RegisterExpression(new UExpressionDescriptor("voice color y", CLRY, false, new string[0]));
+            project.RegisterExpression(new UExpressionDescriptor("cross synthesis (curve)", XSY, 0, 100, 0) { type = UExpressionType.Curve });
+            project.RegisterExpression(new UExpressionDescriptor("growl (curve)", GRWC, 0, 100, 0) { type = UExpressionType.Curve });
+            // Absolute pitches in cents, for expression graphs: the pitch the DiffSinger pitch model rendered, and
+            // the user's own pitch override.
+            project.RegisterExpression(new UExpressionDescriptor("rendered pitch (masked curve)", RPIT, 2400, 10800, 6000) { type = UExpressionType.MaskedCurve });
+            project.RegisterExpression(new UExpressionDescriptor("pitch override (masked curve)", PITO, 2400, 10800, 6000) { type = UExpressionType.MaskedCurve });
 
             string message = string.Empty;
             if (ValidateExpression(project, "g", GEN)) {

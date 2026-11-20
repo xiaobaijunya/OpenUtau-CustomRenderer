@@ -29,9 +29,9 @@ namespace OpenUtau.Core.CustomRender {
         internal static IRenderEngine CreateRenderEngine(UProject project, int startTick = 0, int endTick = -1, int trackNo = -1) {
             if (ShouldUseCustomRenderEngine(project)) {
                 return new CustomRenderEngine(project, startTick, endTick, trackNo);
-            } else {
-                return new Render.RenderEngine(project, startTick, endTick, trackNo);
             }
+            // 未使用自定义渲染器时返回 null，由调用方回退到内置的 RenderEngine。
+            return null;
         }
         readonly UProject project;
         readonly int startTick;
@@ -318,6 +318,8 @@ namespace OpenUtau.Core.CustomRender {
                 request.part.SetMix(request.mix);
             }
             DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));
+            // 合并后的波形刷新：与内置 RenderEngine 一致，走 10Hz 节流的 WaveformReadyNotification。
+            WaveformRefresh.Request();
         }
 
         /// <summary>

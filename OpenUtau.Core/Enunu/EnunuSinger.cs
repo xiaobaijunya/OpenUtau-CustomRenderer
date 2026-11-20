@@ -14,6 +14,7 @@ namespace OpenUtau.Core.Enunu {
         public override string Id => voicebank.Id;
         public override string Name => voicebank.Name;
         public override Dictionary<string, string> LocalizedNames => voicebank.LocalizedNames;
+        public override IList<string> SearchTerms => voicebank.SearchTerms;
         public override USingerType SingerType => voicebank.SingerType;
         public override string BasePath => voicebank.BasePath;
         public override string Author => voicebank.Author;
@@ -44,6 +45,8 @@ namespace OpenUtau.Core.Enunu {
         HashSet<string> phonemes = new HashSet<string>();
         HashSet<string> timbres = new HashSet<string>();
         Dictionary<string, string[]> table = new Dictionary<string, string[]>();
+        /// <summary>Phonemes on the right side of the table.</summary>
+        HashSet<string> tablePhonemes = new HashSet<string>();
 
         public byte[] avatarData;
         public ulong voicebankNameHash;
@@ -79,6 +82,7 @@ namespace OpenUtau.Core.Enunu {
             phonemes.Clear();
             timbres.Clear();
             table.Clear();
+            tablePhonemes.Clear();
             otos.Clear();
             try {
                 var hedPath = Path.Join(Location, enuconfig.questionPath);
@@ -144,9 +148,7 @@ namespace OpenUtau.Core.Enunu {
                     }
                     var parts = line.Trim().Split();
                     table[parts[0]] = parts.Skip(1).ToArray();
-                    foreach (var phoneme in table[parts[0]]) {
-                        //phonemes.Add(phoneme);
-                    }
+                    tablePhonemes.UnionWith(table[parts[0]]);
                 }
             } catch (Exception e) {
                 Log.Error(e, $"Failed to load table for {Name}");
@@ -170,6 +172,22 @@ namespace OpenUtau.Core.Enunu {
             }
         }
 
+        /// <summary>
+        /// Whether the server can turn the lyric into phonemes: every space-separated part is a table key
+        /// (kana, R) or a phoneme in the table. The server passes other parts on as phoneme names the model does not know.
+        /// True when the table could not be loaded, since then nothing can be checked.
+        /// </summary>
+        internal bool IsKnownLyric(string lyric) => IsKnownLyric(lyric, table, tablePhonemes);
+
+        internal static bool IsKnownLyric(string lyric, IReadOnlyDictionary<string, string[]> table, IReadOnlySet<string> tablePhonemes) {
+            if (table.Count == 0) {
+                return true;
+            }
+            // Split as utaupy does when it converts the UST (ustnote2htsnote).
+            var parts = lyric.Replace("っ", " っ ").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length > 0 && parts.All(p => table.ContainsKey(p) || tablePhonemes.Contains(p));
+        }
+
         public override bool TryGetOto(string phoneme, out UOto oto) {
             var parts = phoneme.Split();
             if (parts.All(p => phonemes.Contains(p))) {
@@ -180,14 +198,17 @@ namespace OpenUtau.Core.Enunu {
             return false;
         }
 
-        public override IEnumerable<UOto> GetSuggestions(string text) {
+        public override Dictionary<string, UOto> GetSuggestions(string text, bool isAlias) {
             if (text != null) {
                 text = text.ToLowerInvariant().Replace(" ", "");
             }
             bool all = string.IsNullOrEmpty(text);
             return table.Keys
                 .Where(key => all || key.Contains(text))
-                .Select(key => UOto.OfDummy(key));
+                .ToDictionary(
+                    key => key,
+                    key => UOto.OfDummy(key)
+                );
         }
 
         public override byte[] LoadPortrait() {

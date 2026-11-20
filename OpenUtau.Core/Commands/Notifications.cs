@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using OpenUtau.Core.Render;
 using OpenUtau.Core.Ustx;
 
 namespace OpenUtau.Core {
@@ -34,6 +36,40 @@ namespace OpenUtau.Core {
                 return $"Error message: {message} {e}";
             }
         }
+    }
+    public class ToastNotification : UNotification {
+        public readonly string windowType;
+        public readonly string message;
+        public readonly string translationKey;
+
+        /// <summary>
+        /// Not currently in use
+        /// </summary>
+        public string? title;
+        /// <summary>
+        /// Not currently in use (The color of the toast might change in the future).
+        /// </summary>
+        public string type = "Warning";
+        /// <summary>
+        /// Toast display time. If 0 is specified, it will not close automatically.
+        /// </summary>
+        public long durationSec = 4;
+        public Exception? e;
+
+        /// <summary>
+        /// Displays a toast message in the window that does not interfere with the user's operations.
+        /// </summary>
+        /// <param name="windowType">"MainWindow" or "Pianoroll" (If the specified window is not on top, a toast will always appear in the main window).</param>
+        /// <param name="message">This is not displayed in the UI. The actual text is specified by translationKey.</param>
+        /// <param name="translationKey">The key for the text that actually appears on the toast.</param>
+        /// <param name="e">If there are any associated exceptions, clicking the toast notification will display a standard error dialog.</param>
+        public ToastNotification(string windowType, string message, string translationKey, Exception? e = null) {
+            this.windowType = windowType;
+            this.message = message;
+            this.translationKey = translationKey;
+            this.e = e;
+        }
+        public override string ToString() => $"Toast notification: {message}";
     }
 
     public class LoadingNotification : UNotification {
@@ -84,6 +120,10 @@ namespace OpenUtau.Core {
     }
 
     public class PhonemizedNotification : UNotification {
+        public readonly UVoicePart part;
+        public PhonemizedNotification(UVoicePart part) {
+            this.part = part;
+        }
         public override string ToString() => "Phonemized";
     }
 
@@ -113,6 +153,20 @@ namespace OpenUtau.Core {
         public override string ToString() => $"Set play position to tick {playPosTick}";
     }
 
+    /// <summary>
+    /// Notification for both views to sync time range selection.
+    /// </summary>
+    public class SetRangeSelectionNotification : UNotification {
+        public readonly int startTick;
+        public readonly int endTick;
+        public override bool Silent => true;
+        public SetRangeSelectionNotification(int startTick, int endTick) {
+            this.startTick = startTick;
+            this.endTick = endTick;
+        }
+        public override string ToString() => $"Set range selection {startTick}-{endTick}";
+    }
+
     // Notification for playback manager to change play position
     public class SeekPlayPosTickNotification : UNotification {
         public int playPosTick;
@@ -134,6 +188,77 @@ namespace OpenUtau.Core {
             Info = info;
         }
         public override string ToString() => $"Set progress {Progress} {Info}";
+    }
+
+    // Notification to update the phrase blocks in PartControl, optional RenderPhrase for exact update.
+    public class PhraseRenderStateNotification : UNotification {
+        public UVoicePart Part { get; }
+        public RenderPhrase? Phrase { get; }
+        public int StartTick { get; }
+        public int EndTick { get; }
+        public bool Rendered { get; }
+        public override bool Silent => true;
+
+        public PhraseRenderStateNotification(UVoicePart part, int startTick, int endTick, bool rendered) {
+            Part = part;
+            StartTick = startTick;
+            EndTick = endTick;
+            Rendered = rendered;
+        }
+
+        public PhraseRenderStateNotification(UVoicePart part, RenderPhrase phrase, bool rendered) {
+            Part = part;
+            Phrase = phrase;
+            StartTick = phrase.position;
+            EndTick = phrase.end;
+            Rendered = rendered;
+        }
+
+        public override string ToString() => Rendered
+            ? $"Phrase Status | {Part.DisplayName} {StartTick}-{EndTick} Rendered"
+            : $"Phrase Status | {Part.DisplayName} {StartTick}-{EndTick} Unrendered";
+    }
+
+    public class RebuildPhraseBlocksNotification : UNotification {
+        public UVoicePart Part { get; }
+        public override bool Silent => true;
+
+        public RebuildPhraseBlocksNotification(UVoicePart part) {
+            Part = part;
+        }
+
+        public override string ToString() => $"Rebuild phrase blocks | {Part.DisplayName}";
+    }
+
+    /// <summary>
+    /// A warning that needs the user's attention. DocManager keeps it until a
+    /// <see cref="ClearWarningsNotification"/>; the main window shows a warning sign
+    /// next to the main menu while any are kept. A warning replaces an earlier one
+    /// with the same key, so a check that runs repeatedly doesn't pile up copies.
+    /// Title and detail are string resource keys, formatted with <see cref="Args"/>
+    /// ({0}, {1}, ...) in the UI language.
+    /// </summary>
+    public class WarningNotification : UNotification {
+        public string Key { get; }
+        public string TitleKey { get; }
+        public string? DetailKey { get; }
+        public object[] Args { get; }
+        public WarningNotification(string key, string titleKey, string? detailKey = null, params object[] args) {
+            Key = key;
+            TitleKey = titleKey;
+            DetailKey = detailKey;
+            Args = args;
+        }
+        public override string ToString() => $"Warning: {TitleKey} {string.Join(", ", Args)}";
+    }
+
+    /// <summary>Clears the warning with <paramref name="key"/>, or all warnings when null.</summary>
+    public class ClearWarningsNotification : UNotification {
+        public readonly string? key;
+        public ClearWarningsNotification(string? key = null) {
+            this.key = key;
+        }
+        public override string ToString() => key == null ? "Clear warnings" : $"Clear warning {key}";
     }
 
     public class VolumeChangeNotification : UNotification {
@@ -171,6 +296,13 @@ namespace OpenUtau.Core {
     public class SingersChangedNotification : UNotification {
         public SingersChangedNotification() { }
         public override string ToString() => "Singers changed.";
+    }
+
+    /// <summary>
+    /// Packages in the Dependencies folder were installed, removed or edited.
+    /// </summary>
+    public class PackagesChangedNotification : UNotification {
+        public override string ToString() => "Packages changed.";
     }
 
     public class SingersRefreshedNotification : UNotification {
@@ -223,7 +355,14 @@ namespace OpenUtau.Core {
     }
 
     public class PreRenderNotification : UNotification {
-        public override string ToString() => $"Pre-render notification.";
+        public readonly int focusTick;
+
+        public PreRenderNotification(UPart part = null, int focusTick = -1) {
+            this.part = part;
+            this.focusTick = focusTick;
+        }
+
+        public override string ToString() => "Pre-render notification.";
     }
 
     public class PartRenderedNotification : UNotification {
@@ -231,6 +370,26 @@ namespace OpenUtau.Core {
             this.part = part;
         }
         public override string ToString() => "Part rendered.";
+    }
+
+    public class RealCurvesUpdatedNotification : UNotification {
+        public readonly IReadOnlyList<RealCurveUpdate> updates;
+        public override bool Silent => true;
+        public RealCurvesUpdatedNotification(UVoicePart part, IReadOnlyList<RealCurveUpdate> updates) {
+            this.part = part;
+            this.updates = updates;
+        }
+        public override string ToString() => "Real curves updated.";
+    }
+
+    public class RealCurveCoverageNotification : UNotification {
+        public readonly IReadOnlyList<(int start, int end)> ranges;
+        public override bool Silent => true;
+        public RealCurveCoverageNotification(UVoicePart part, IReadOnlyList<(int start, int end)> ranges) {
+            this.part = part;
+            this.ranges = ranges;
+        }
+        public override string ToString() => "Real curve coverage.";
     }
 
     public class GotoOtoNotification : UNotification {

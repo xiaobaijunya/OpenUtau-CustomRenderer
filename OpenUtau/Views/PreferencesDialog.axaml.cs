@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using OpenUtau.App.ViewModels;
@@ -15,6 +16,28 @@ namespace OpenUtau.App.Views {
 
         public PreferencesDialog() {
             InitializeComponent();
+        }
+
+        void OnMetronomeSliderPointerPressed(object? sender, PointerPressedEventArgs e) {
+            if (sender is not Slider slider || viewModel == null) {
+                return;
+            }
+            var point = e.GetCurrentPoint(slider);
+            if (!point.Properties.IsRightButtonPressed) {
+                return;
+            }
+            switch (slider.Tag as string) {
+                case "MetronomeVolume":
+                    viewModel.ResetMetronomeVolume();
+                    break;
+                case "MetronomeHighFrequency":
+                    viewModel.ResetMetronomeHighFrequency();
+                    break;
+                case "MetronomeLowFrequency":
+                    viewModel.ResetMetronomeLowFrequency();
+                    break;
+            }
+            e.Handled = true;
         }
 
         void OpenSingersFolder(object sender, RoutedEventArgs e) {
@@ -84,6 +107,17 @@ namespace OpenUtau.App.Views {
             }
         }
 
+        async void SelectUiFont(object sender, RoutedEventArgs e) {
+            var path = await FilePicker.OpenFile(this, "prefs.appearance.customfont.select", FilePicker.FontFiles);
+            if (!string.IsNullOrEmpty(path) && UiFontManager.IsSupportedFontPath(path)) {
+                viewModel!.SetUiFontPath(path);
+            }
+        }
+
+        void ResetUiFont(object sender, RoutedEventArgs e) {
+            viewModel!.ResetUiFont();
+        }
+        
         void ResetWinePath(object sender, RoutedEventArgs e) {
             ((PreferencesViewModel)DataContext!).SetWinePath(string.Empty);
         }
@@ -117,6 +151,7 @@ namespace OpenUtau.App.Views {
         }
 
         void OpenCustomThemeEditor(object sender, RoutedEventArgs e) {
+            if (CustomTheme.IsPackageTheme(viewModel!.ThemeName)) return;
             ThemeEditorWindow.Show(CustomTheme.Themes[viewModel!.ThemeName]);
         }
 
@@ -146,6 +181,7 @@ namespace OpenUtau.App.Views {
         }
 
         async void OnCustomThemeDelete(object sender, RoutedEventArgs e) {
+            if (CustomTheme.IsPackageTheme(viewModel!.ThemeName)) return;
             var result = await MessageBox.Show(
                 this,
                 ThemeManager.GetString("prefs.appearance.customtheme.delete.message"),

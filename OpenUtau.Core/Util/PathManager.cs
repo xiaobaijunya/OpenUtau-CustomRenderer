@@ -40,11 +40,19 @@ namespace OpenUtau.Core {
                 }
                 CachePath = Path.Combine(cacheHome, "OpenUtau");
                 HomePathIsAscii = true;
+                AppImagePath = Environment.GetEnvironmentVariable("APPIMAGE");
+                if (File.Exists(AppImagePath)) {
+                    IsAppImage = Environment.GetEnvironmentVariable("IS_OPENUTAU_APPIMAGE").Equals("true");
+                }
             } else {
-                string exePath = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName);
-                IsInstalled = File.Exists(Path.Combine(exePath, "installed.txt"));
+                // AppContext.BaseDirectory correctly resolves to the application's output
+                // directory in both normal execution (portable/installed mode) and during
+                // dotnet test, unlike Process.MainModule which points to testhost.exe
+                // during tests.
+                string appDir = Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory);
+                IsInstalled = File.Exists(Path.Combine(appDir, "installed.txt"));
                 if (!IsInstalled) {
-                    DataPath = exePath;
+                    DataPath = appDir;
                 } else {
                     string dataHome = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
                     DataPath = Path.Combine(dataHome, "OpenUtau");
@@ -67,11 +75,15 @@ namespace OpenUtau.Core {
         public string CachePath { get; private set; }
         public bool HomePathIsAscii { get; private set; }
         public bool IsInstalled { get; private set; }
+        public bool IsAppImage { get; private set; }
+        public string AppImagePath { get; private set; }
         public string SingersPathOld => Path.Combine(DataPath, "Content", "Singers");
         public string SingersPath => Path.Combine(DataPath, "Singers");
         public List<string> AdditionalSingersPaths => Preferences.Default.AdditionalSingerPaths
             .Where(p => !string.IsNullOrWhiteSpace(p))
             .ToList();
+        /// <summary>第一个附加歌手路径，供仍按单路径使用的调用方（如上游的歌手列表按钮）。</summary>
+        public string AdditionalSingersPath => AdditionalSingersPaths.FirstOrDefault() ?? string.Empty;
         public string SingersInstallPath => Preferences.Default.InstallToAdditionalSingersPath
             && AdditionalSingersPaths.Count > 0
                 ? AdditionalSingersPaths[0]
@@ -141,6 +153,10 @@ namespace OpenUtau.Core {
                     Log.Error(e, $"Failed to delete dir {dir}");
                 }
             }
+            OpenUtau.Core.PlaybackManager.Inst.StopPlayback();
+            // Drop the slot registry's cache and session: everything below is re-rendered.
+            OpenUtau.Core.PlaybackManager.Inst.MixPlanner.Clear();
+            OpenUtau.Core.DocManager.Inst.ExecuteCmd(new OpenUtau.Core.WaveformReadyNotification());
         }
 
         readonly static string[] sizes = { "B", "KB", "MB", "GB", "TB", "PB", "EB" };

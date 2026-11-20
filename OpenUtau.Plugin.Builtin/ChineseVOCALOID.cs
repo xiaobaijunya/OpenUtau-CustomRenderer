@@ -173,8 +173,8 @@ namespace OpenUtau.Plugin.Builtin {
 
             var attr0 = note.phonemeAttributes?.FirstOrDefault(attr => attr.index == 0) ?? default;
             var attr1 = note.phonemeAttributes?.FirstOrDefault(attr => attr.index == 1) ?? default;
-            int tone = note.tone + attr0.toneShift;
-            string color = attr0.voiceColor;
+            int tone = note.tone + (attr0.toneShift ?? GetParentToneShift());
+            string color = attr0.voiceColor ?? GetParentVoiceColor();
             double? stretchRatio = attr1.consonantStretchRatio;
 
             int totalDuration = notes.Sum(n => n.duration);

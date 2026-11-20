@@ -1,29 +1,114 @@
 on:
+  schedule:
+    # Daily alpha build. Skipped if master has no new commits since the
+    # last alpha release (see the next-version job below).
+    - cron: '0 12 * * *'
   workflow_dispatch:
     inputs:
+      channel:
+        description: "Release channel"
+        type: choice
+        default: alpha
+        options:
+          - stable
+          - beta
+          - alpha
       version:
-        description: "Version"
-        default: "0.0.0"
-        required: true
+        description: "Version (required for stable/beta, ignored for alpha)"
+        default: ""
+        required: false
         type: string
       release:
         type: boolean
         default: false
         description: "Release"
-      beta:
-        type: boolean
-        default: true
-        description: "Beta"
       draft:
         type: boolean
         default: true
         description: "Draft"
 
-env:
-  release-name: ${{ inputs.version }}${{ inputs.beta && ' Beta' || '' }}
+# Keep same-trigger-type runs from overlapping, e.g. a slow scheduled build
+# still running when the next day's cron fires.
+concurrency:
+  group: release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  next-version:
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.nv.outputs.channel }}
+      version: ${{ steps.nv.outputs.version }}
+      tag: ${{ steps.nv.outputs.tag }}
+      name: ${{ steps.nv.outputs.name }}
+      release: ${{ steps.nv.outputs.release }}
+      draft: ${{ steps.nv.outputs.draft }}
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - id: check
+        # Scheduled runs skip the build entirely when master hasn't moved
+        # since the last alpha release, so a quiet day publishes nothing.
+        if: github.event_name == 'schedule'
+        run: |
+          latest_tag=$(git tag --list '*-alpha' | sort -V | tail -1)
+          if [ -z "$latest_tag" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            last_sha=$(git rev-list -n 1 "$latest_tag")
+            head_sha=$(git rev-parse HEAD)
+            if [ "$last_sha" = "$head_sha" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+      - id: nv
+        if: steps.check.outputs.skip != 'true'
+        env:
+          # Scheduled runs always build and publish an alpha release.
+          EVENT: ${{ github.event_name }}
+          CHANNEL: ${{ github.event_name == 'schedule' && 'alpha' || inputs.channel }}
+          VERSION: ${{ inputs.version }}
+          RELEASE: ${{ github.event_name == 'schedule' && 'true' || inputs.release }}
+          DRAFT: ${{ github.event_name == 'schedule' && 'false' || inputs.draft }}
+        run: |
+          set -u
+          # Alpha is the only auto-versioned channel; stable and beta take
+          # the version from the dispatch input.
+          if [ "$CHANNEL" = alpha ]; then
+            git ls-remote --tags origin > tags.txt
+            version=$(python .github/scripts/next-version.py < tags.txt)
+            tag="$version-alpha"
+            name="$version Alpha"
+          else
+            if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+[.][0-9]+[.][0-9]+$'; then
+              echo "::error::version must be X.Y.Z for the $CHANNEL channel (got '$VERSION')"
+              exit 1
+            fi
+            version="$VERSION"
+            if [ "$CHANNEL" = beta ]; then
+              tag="$version-beta"
+              name="$version Beta"
+            else
+              tag="$version"
+              name="$version"
+            fi
+          fi
+          {
+            echo "channel=$CHANNEL"
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "name=$name"
+            echo "release=$RELEASE"
+            echo "draft=$DRAFT"
+          } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
   build:
+    needs: next-version
+    if: needs.next-version.outputs.skip != 'true'
     runs-on: ${{ matrix.arch.runs-on }}
     permissions:
       contents: write
@@ -33,7 +118,6 @@ jobs:
       matrix:
         arch:
           - { name: win-x64, rid: win-x64, arch: x64, os: win, runs-on: windows-latest }
-          - { name: win-x86, rid: win-x86, arch: x86, os: win, runs-on: windows-latest }
           - { name: win-arm64, rid: win-arm64, arch: arm64, os: win, runs-on: windows-latest }
           - { name: osx-arm64, rid: osx-arm64, arch: arm64, os: osx, runs-on: macos-latest }
           - { name: linux-x64, rid: linux-x64, arch: x64, os: linux, runs-on: ubuntu-latest, linuxarch: x86_64}
@@ -46,18 +130,19 @@ jobs:
           dotnet-version: |
             6.0.x
             8.0.x
+            10.0.x
       - uses: actions/setup-node@v4
         with:
           node-version: 20
 
       - uses: justalemon/VersionPatcher@v0.7.1
         with:
-          version: ${{ inputs.version }}
+          version: ${{ needs.next-version.outputs.version }}
           csproj-files: "OpenUtau/*.csproj"
 
       # Test
       - name: Test
-        run: dotnet test OpenUtau.Test
+        run: dotnet run --project OpenUtau.Test/OpenUtau.Test.csproj
 
       # Build
       - name: Restore
@@ -70,9 +155,33 @@ jobs:
       - name: Build (MacOS)
         run: dotnet msbuild OpenUtau -t:BundleApp -p:Configuration=Release -p:RuntimeIdentifier=${{ matrix.arch.rid }} -p:UseAppHost=true -p:SelfContained=true -p:OutputPath=../bin/${{ matrix.arch.name }}/
         if: ${{ matrix.arch.os == 'osx' }}
-      
+
+      - name: Add Liquid Glass icon (macOS)
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.2.app
+          chmod +x .github/scripts/add-liquid-glass-icon.sh
+          .github/scripts/add-liquid-glass-icon.sh \
+            bin/${{ matrix.arch.name }}/publish/OpenUtau.app \
+            OpenUtau/Assets/OpenUtau.icon \
+            OpenUtau
+        if: ${{ matrix.arch.os == 'osx' }}
+
+      # The macOS runner is a plugin execution provider: without its library in the
+      # bundle the app silently falls back to CPU, so fail the build here instead.
+      - name: Verify WebGPU execution provider is bundled (macOS)
+        run: |
+          app="bin/${{ matrix.arch.name }}/publish/OpenUtau.app"
+          lib=$(find "$app" -name 'libonnxruntime_providers_webgpu.dylib' -print -quit)
+          if [ -z "$lib" ]; then
+            echo "::error::libonnxruntime_providers_webgpu.dylib is missing from $app"
+            find "$app" -name '*onnxruntime*' -print
+            exit 1
+          fi
+          echo "WebGPU plugin library: $lib"
+        if: ${{ matrix.arch.os == 'osx' }}
+
       - name: Write release channel info
-        run: "@{Beta=$${{ inputs.beta }}} | ConvertTo-Json > bin/${{ matrix.arch.name }}/prefs-default.json"
+        run: "@{Channel='${{ needs.next-version.outputs.channel }}'} | ConvertTo-Json > bin/${{ matrix.arch.name }}/prefs-default.json"
         shell: pwsh
 
       # Create Zip
@@ -106,8 +215,7 @@ jobs:
         if: ${{ !inputs.release }}
 
       # Appcast
-      - name: Appcast Windows
-        shell: cmd
+      - name: Appcast
         run: |
           python appcast.py -v=${{ inputs.version }} -o=windows -r=${{ matrix.arch.name }} -f=OpenUtau-${{ matrix.arch.name }}.zip
         if: ${{ inputs.release && matrix.arch.os == 'win' }}

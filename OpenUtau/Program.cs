@@ -8,7 +8,7 @@ using System.Text;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
-using Avalonia.ReactiveUI;
+using ReactiveUI.Avalonia;
 using OpenUtau.App.ViewModels;
 using OpenUtau.Core;
 using Serilog;
@@ -70,14 +70,30 @@ namespace OpenUtau.App {
             } else if (OS.IsMacOS()) {
                 //To avoid text display corruption, specify Hiragino Sans font first.
                 //Due to the specification of AvaloniaUI, this only affects when the language is set to Japanese.
-                fontOptions.DefaultFamilyName = "Hiragino Sans, Segoe UI, San Francisco, Helvetica Neue";
+                fontOptions.DefaultFamilyName = "Hiragino Sans";
+                fontOptions.FontFallbacks = [
+                    new FontFallback { FontFamily = new FontFamily("Helvetica Neue") },
+                    new FontFallback { FontFamily = new FontFamily("Arial") },
+                ];
             }
-            return AppBuilder.Configure<App>()
+
+            var builder = AppBuilder.Configure<App>()
                 .UsePlatformDetect()
                 .LogToTrace()
-                .UseReactiveUI()
+                .UseReactiveUI(_ => { })
                 .With(fontOptions)
-                .With(new X11PlatformOptions {EnableIme = true});
+                .With(new SkiaOptions
+                {
+                    MaxGpuResourceSizeBytes = 256 * 1024 * 1024 // 256 MB
+                });
+            
+            if (OS.IsLinux() && Core.Util.Preferences.Default.UseWayland) {
+                builder.UseWaylandWithFallback();
+            }
+            
+            return builder.With(new X11PlatformOptions {
+                EnableIme = true
+            });
         }
 
         public static void Run(string[] args)
@@ -93,8 +109,8 @@ namespace OpenUtau.App {
                     .MinimumLevel.Information()
                     .WriteTo.File(PathManager.Inst.LogFilePath, rollingInterval: RollingInterval.Day, encoding: Encoding.UTF8))
                 .WriteTo.Logger(lc => lc
-                    .MinimumLevel.ControlledBy(DebugViewModel.Sink.Inst.LevelSwitch)
-                    .WriteTo.Sink(DebugViewModel.Sink.Inst))
+                    .MinimumLevel.ControlledBy(DeveloperViewModel.Sink.Inst.LevelSwitch)
+                    .WriteTo.Sink(DeveloperViewModel.Sink.Inst))
                 .CreateLogger();
             AppDomain.CurrentDomain.UnhandledException += new UnhandledExceptionEventHandler((sender, args) => {
                 Log.Error((Exception)args.ExceptionObject, "Unhandled exception");

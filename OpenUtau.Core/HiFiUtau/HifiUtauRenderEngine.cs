@@ -288,6 +288,8 @@ namespace OpenUtau.Core.HiFiUtau {
                 request.part.SetMix(request.mix);
             }
             DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));
+            // 合并后的波形刷新：与内置 RenderEngine 一致，走 10Hz 节流的 WaveformReadyNotification。
+            WaveformRefresh.Request();
         }
 
         /// <summary>渲染单个 phrase（统一委托给 phrase.renderer）。</summary>

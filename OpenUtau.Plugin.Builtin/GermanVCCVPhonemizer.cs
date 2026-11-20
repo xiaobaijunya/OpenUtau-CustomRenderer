@@ -33,34 +33,9 @@ namespace OpenUtau.Plugin.Builtin {
         protected override string[] GetVowels() => vowels;
         protected override string[] GetConsonants() => consonants;
         protected override string GetDictionaryName() => "cmudict_de.txt";
-        private bool isYamlFallbacks = false;
 
-        protected override IG2p LoadBaseDictionary() {
-            var g2ps = new List<IG2p>();
-
-            // Load dictionary from plugin folder.
-            string path = Path.Combine(PluginDir, YamlFileName);
-            if (!File.Exists(path)) {
-                Directory.CreateDirectory(PluginDir);
-                File.WriteAllBytes(path, YamlTemplate);
-            }
-            g2ps.Add(G2pDictionary.NewBuilder().Load(File.ReadAllText(path)).Build());
-
-            // Load dictionary from singer folder.
-            if (singer != null && singer.Found && singer.Loaded) {
-                string file = Path.Combine(singer.Location, YamlFileName);
-                if (File.Exists(file)) {
-                    try {
-                        g2ps.Add(G2pDictionary.NewBuilder().Load(File.ReadAllText(file)).Build());
-                    } catch (Exception e) {
-                        Log.Error(e, $"Failed to load {file}");
-                    }
-                }
-            }
-
-            // Load base g2p.
-            g2ps.Add(new GermanG2p());
-            return new G2pFallbacks(g2ps.ToArray());
+        protected override IG2p[] GetBaseG2ps() {
+            return new IG2p[] { new GermanG2p() };
         }
 
         protected override string[] GetSymbols(Note note) {
@@ -69,6 +44,12 @@ namespace OpenUtau.Plugin.Builtin {
                 return null;
             }
             List<string> finalProcessedPhonemes = new List<string>();
+            
+            for (int i = 0; i < original.Length; i++) {
+                if (dictionaryReplacements.TryGetValue(original[i], out string replaced)) {
+                    original[i] = replaced;
+                }
+            }
 
             string[] diphthongs = new[] { "aU", "OY", "aI" };
             foreach (string s in original) {
@@ -79,19 +60,6 @@ namespace OpenUtau.Plugin.Builtin {
                 }
             }
             return finalProcessedPhonemes.ToArray();
-        }
-
-        // prioritize yaml replacements over dictionary replacements
-        private string ReplacePhoneme(string phoneme, int tone) {
-            // If the original phoneme has an OTO, use it directly.
-            if (HasOto(phoneme, tone) || HasOto(ValidateAlias(phoneme), tone)) {
-                return phoneme;
-            }
-            // Otherwise, try to apply the dictionary replacement.
-            if (dictionaryReplacements.TryGetValue(phoneme, out var replaced)) {
-                return replaced;
-            }
-            return phoneme;
         }
 
         protected override List<string> ProcessSyllable(Syllable syllable) {
@@ -108,13 +76,6 @@ namespace OpenUtau.Plugin.Builtin {
             string[] CurrentWordCc = syllable.CurrentWordCc.Select(c => ReplacePhoneme(c, syllable.tone)).ToArray();
             string[] PreviousWordCc = syllable.PreviousWordCc.Select(c => ReplacePhoneme(c, syllable.tone)).ToArray();
             int prevWordConsonantsCount = syllable.prevWordConsonantsCount;
-
-            foreach (var entry in yamlFallbacks) {
-                if (!HasOto(entry.Key, syllable.tone) && !HasOto(entry.Key, syllable.tone)) {
-                    isYamlFallbacks = true;
-                    break;
-                }
-            }
 
             if (syllable.IsStartingV) {
                 basePhoneme = $"- {v}"; ;
@@ -406,59 +367,51 @@ namespace OpenUtau.Plugin.Builtin {
             return phonemes;
         }
 
-        protected override string ValidateAlias(string alias) {
-            foreach (var VV in new[] { "a 6", "a6" }) {
-                alias = alias.Replace(VV, "a a");
-            }
-            foreach (var CC in new[] { "n S" }) {
-                alias = alias.Replace(CC, "n tS");
-            }
-            foreach (var CC in new[] { "l S" }) {
-                alias = alias.Replace(CC, "l tS");
-            }
-            foreach (var CC in new[] { "nS" }) {
-                alias = alias.Replace(CC, "ntS");
-            }
-            foreach (var CC in new[] { "lS" }) {
-                alias = alias.Replace(CC, "ltS");
-            }
-            foreach (var CC in new[] { "n s" }) {
-                alias = alias.Replace(CC, "n ts");
-            }
-            foreach (var CC in new[] { "l s" }) {
-                alias = alias.Replace(CC, "l ts");
-            }
-            foreach (var CC in new[] { "ns" }) {
-                alias = alias.Replace(CC, "nts");
-            }
-            foreach (var CC in new[] { "ls" }) {
-                alias = alias.Replace(CC, "lts");
-            }
-            foreach (var CC in new[] { "st" }) {
-                alias = alias.Replace(CC, "tst");
-            }
-            // Split diphthongs adjuster
-            if (alias.Contains("U^")) {
-                alias = alias.Replace("U^", "U");
-            }
-            if (alias.Contains("I^")) {
-                alias = alias.Replace("I^", "I");
-            }
-            if (alias.Contains("Y^")) {
-                alias = alias.Replace("Y^", "Y");
+        protected override string GetHardcodedFallback(string alias, int tone, HashSet<string> suppressedTokens) {
+            string candidate = alias;
+
+            // Helper to apply string replacements safely with strict casing and YAML suppression checks
+            void TryReplace(string fromPattern, string toPattern, params string[] sourceTokens) {
+                if (suppressedTokens != null && sourceTokens.Any(t => suppressedTokens.Contains(t))) return;
+                candidate = candidate.Replace(fromPattern, toPattern, StringComparison.Ordinal);
             }
 
-            if (isYamlFallbacks) {
-                foreach (var syllable in yamlFallbacks.OrderByDescending(f => f.Key.Length)) {
-                    alias = alias.Replace(syllable.Key, syllable.Value);
-                }
+            // Vowel fallback (a 6 / a6 -> a a)
+            TryReplace("a 6", "a a", "6");
+            TryReplace("a6", "a a", "6");
+
+            // Affricate epenthesis fallbacks (with uppercase S)
+            TryReplace("n S", "n tS", "S");
+            TryReplace("l S", "l tS", "S");
+            TryReplace("nS", "ntS", "S");
+            TryReplace("lS", "ltS", "S");
+
+            // Affricate epenthesis fallbacks (with lowercase s)
+            TryReplace("n s", "n ts", "s");
+            TryReplace("l s", "l ts", "s");
+            TryReplace("ns", "nts", "s");
+            TryReplace("ls", "lts", "s");
+
+            // Cluster adjustment
+            TryReplace("st", "tst", "s", "t");
+
+            // Split diphthong adjusters
+            TryReplace("U^", "U", "U^");
+            TryReplace("I^", "I", "I^");
+            TryReplace("Y^", "Y", "Y^");
+
+            if (!string.Equals(candidate, alias, StringComparison.Ordinal) && HasOto(candidate, tone)) {
+                return candidate;
             }
 
-            return alias;
+            return null;
         }
+        protected override bool NoGap => true;
 
-        protected override double GetTransitionBasicLengthMs(string alias = "") {
-            return base.GetTransitionBasicLengthMs();
+        protected override double GetTransitionBasicLengthMs(string alias, int tone, PhonemeAttributes attr) {
+            double otoLength = GetTransitionBasicLengthMsByOto(alias, tone, attr);
+
+            return otoLength;
         }
     }
 }

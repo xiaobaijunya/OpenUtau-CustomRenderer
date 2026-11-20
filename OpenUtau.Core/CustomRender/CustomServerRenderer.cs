@@ -78,9 +78,9 @@ namespace OpenUtau.Core.CustomRender {
             };
         }
 
-        // IRenderer 接口实现（5参数）
+        // IRenderer 接口实现
         public Task<RenderResult> Render(RenderPhrase phrase, Progress progress, int trackNo,
-            CancellationTokenSource cancellation, bool isPreRender) {
+            CancellationTokenSource cancellation, bool isPreRender = false, RenderPhraseEvents? renderEvents = null) {
             return RenderImpl(phrase, progress, trackNo, cancellation, isPreRender, null);
         }
 

@@ -2,10 +2,11 @@ using System;
 using OpenUtau.Core.Analysis;
 using OpenUtau.Core.Editing;
 using ReactiveUI;
-using ReactiveUI.Fody.Helpers;
+using System.Reactive.Linq;
+using ReactiveUI.SourceGenerators;
 
 namespace OpenUtau.App.ViewModels {
-    public class ApplyPitchViewModel : ViewModelBase {
+    public partial class ApplyPitchViewModel : ViewModelBase {
         public bool RmvpeAvailable { get; }
         public bool CrepeAvailable { get; }
         public bool WorldDioAvailable { get; }
@@ -13,7 +14,7 @@ namespace OpenUtau.App.ViewModels {
         public bool WorldPyinAvailable { get; }
 
         [Reactive]
-        public PitchExtractionMethod SelectedMethod { get; set; } = PitchExtractionMethod.Rmvpe;
+        public partial PitchExtractionMethod SelectedMethod { get; set; } = PitchExtractionMethod.Rmvpe;
 
         // Convenience bool bindings for RadioButtons
         public bool UseRmvpe {
@@ -92,15 +93,18 @@ namespace OpenUtau.App.ViewModels {
             }
 
             // Propagate SelectedMethod changes to derived properties
-            this.WhenAnyValue(vm => vm.SelectedMethod)
-                .Subscribe(_ => {
-                    this.RaisePropertyChanged(nameof(UseRmvpe));
-                    this.RaisePropertyChanged(nameof(UseCrepe));
-                    this.RaisePropertyChanged(nameof(UseWorldDio));
-                    this.RaisePropertyChanged(nameof(UseWorldHarvest));
-                    this.RaisePropertyChanged(nameof(UseWorldPyin));
-                    this.RaisePropertyChanged(nameof(CanRun));
-                });
+            // Propagate SelectedMethod changes to derived properties
+            PropertyChanged += (_, e) => {
+                if (e.PropertyName != nameof(SelectedMethod)) {
+                    return;
+                }
+                this.RaisePropertyChanged(nameof(UseRmvpe));
+                this.RaisePropertyChanged(nameof(UseCrepe));
+                this.RaisePropertyChanged(nameof(UseWorldDio));
+                this.RaisePropertyChanged(nameof(UseWorldHarvest));
+                this.RaisePropertyChanged(nameof(UseWorldPyin));
+                this.RaisePropertyChanged(nameof(CanRun));
+            };
         }
     }
 }

@@ -72,7 +72,7 @@ namespace OpenUtau.Core.HiFiUtau {
         }
 
         public Task<RenderResult> Render(RenderPhrase phrase, Progress progress, int trackNo,
-            CancellationTokenSource cancellation, bool isPreRender) {
+            CancellationTokenSource cancellation, bool isPreRender = false, RenderPhraseEvents? renderEvents = null) {
             return RenderImpl(phrase, progress, trackNo, cancellation, isPreRender);
         }
 

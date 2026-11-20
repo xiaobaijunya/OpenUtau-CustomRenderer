@@ -23,18 +23,18 @@ namespace OpenUtau.Core.Render {
         public readonly double durationMs;
         public readonly double endMs;
 
-        public RenderNote(UProject project, UPart part, UNote note, int phrasePosition) {
-            lyric = note.lyric;
-            tone = note.tone;
-            tuning = note.tuning;
+        public RenderNote(Pipeline.NoteSource note, TimeAxis axis, int partPosition, int phrasePosition) {
+            lyric = note.Lyric;
+            tone = note.Tone;
+            tuning = note.Tuning;
             adjustedTone = note.AdjustedTone;
 
-            position = part.position + note.position - phrasePosition;
-            duration = note.duration;
+            position = partPosition + note.Position - phrasePosition;
+            duration = note.Duration;
             end = position + duration;
 
-            positionMs = project.timeAxis.TickPosToMsPos(part.position + note.position);
-            endMs = project.timeAxis.TickPosToMsPos(part.position + note.End);
+            positionMs = axis.TickPosToMsPos(partPosition + note.Position);
+            endMs = axis.TickPosToMsPos(partPosition + note.End);
             durationMs = endMs - positionMs;
         }
     }
@@ -66,11 +66,14 @@ namespace OpenUtau.Core.Render {
         public readonly double adjustedTempo;
         public readonly Tuple<string, int?, string>[] flags;// flag, value, abbr. Abbr is kept here for flag filtering.
         public readonly string suffix;
+        public readonly string suffix2; // only set when the part has an xsy curve
         public readonly float volume;
         public readonly float velocity;
         public readonly float modulation;
         public readonly bool direct;
         public readonly Vector2[] envelope;
+        /// <summary>The per-phoneme values the expression graph drove, for display. Not part of the hash.</summary>
+        public readonly IReadOnlyDictionary<string, float>? drivenExpressions;
 
         // voicevox & enunu args
         public readonly int toneShift;
@@ -82,63 +85,62 @@ namespace OpenUtau.Core.Render {
         // splice mode (SPLC): 0=default, 1=old splicing
         public readonly int spliceMode;
 
-        public readonly UOto oto;
-        public readonly ulong hash;
+        public UOto oto { get; private set; }
+        public readonly UOto oto2;
+        public ulong hash { get; private set; }
 
-        internal RenderPhone(UProject project, UTrack track, UVoicePart part, UNote note, UPhoneme phoneme, int phrasePosition) {
-            position = part.position + phoneme.position - phrasePosition;
+        // Masks the hashes of an xsy secondary-variant render so its cache
+        // files stay distinct from the primary render's.
+        internal const ulong Oto2HashMask = 0x5858585858585858;
+
+        /// <summary>
+        /// A copy of this phone carrying a different oto (the secondary oto of an
+        /// xsy render) with the matching hash mask.
+        /// </summary>
+        internal RenderPhone WithOto(UOto oto) {
+            var copy = (RenderPhone)MemberwiseClone();
+            copy.oto = oto;
+            copy.hash = hash ^ Oto2HashMask;
+            return copy;
+        }
+
+        internal RenderPhone(Pipeline.PhraseSource source, Pipeline.PhonemeSource phoneme, int phrasePosition) {
+            position = source.PartPosition + phoneme.Position - phrasePosition;
             duration = phoneme.Duration;
             end = position + duration;
             positionMs = phoneme.PositionMs;
             durationMs = phoneme.DurationMs;
             endMs = phoneme.EndMs;
-            leadingMs = phoneme.preutter;
-            leading = Math.Max(0, project.timeAxis.TicksBetweenMsPos(positionMs - leadingMs, positionMs));
+            leadingMs = phoneme.Preutter;
+            leading = phoneme.Leading;
 
-            this.phoneme = phoneme.phoneme;
-            tone = note.tone;
-            tempos = project.timeAxis.TemposBetweenTicks(part.position + phoneme.position - leading, part.position + phoneme.End);
-            UTempo[] noteTempos = project.timeAxis.TemposBetweenTicks(part.position + phoneme.position, part.position + phoneme.End);
-            tempo = noteTempos.Length > 0 ? noteTempos[0].bpm : project.tempos[0].bpm;
+            this.phoneme = phoneme.Phoneme;
+            tone = phoneme.Tone;
+            tempos = phoneme.Tempos;
+            tempo = phoneme.Tempo;
+            adjustedTempo = phoneme.AdjustedTempo;
 
-            double actualTickDuration = 0;
-            for (int i = 0; i < noteTempos.Length; i++) {
-                int tempoStart = Math.Max(part.position + phoneme.position, noteTempos[i].position);
-                int tempoEnd = i + 1 < noteTempos.Length ? noteTempos[i + 1].position : part.position + phoneme.End;
-                int tempoLength = tempoEnd - tempoStart;
-                actualTickDuration += (double)(tempoLength * (tempo / noteTempos[i].bpm));
-            }
+            preutterMs = phoneme.Preutter;
+            overlapMs = phoneme.Overlap;
+            durCorrectionMs = phoneme.Preutter - phoneme.TailIntrude + phoneme.TailOverlap;
 
-            adjustedTempo = duration / actualTickDuration * tempo;
+            resampler = phoneme.Resampler;
+            flags = phoneme.Flags;
+            suffix = phoneme.Suffix;
+            suffix2 = phoneme.Suffix2;
+            volume = phoneme.Volume;
+            velocity = phoneme.Velocity;
+            modulation = phoneme.Modulation;
+            envelope = phoneme.Envelope;
+            direct = phoneme.Direct;
+            toneShift = phoneme.ToneShift;
+            drivenExpressions = phoneme.Driven;
+            phonemeType = phoneme.PhonemeType;
+            stretchMode = phoneme.StretchMode;
+            spliceMode = phoneme.SpliceMode;
 
-            preutterMs = phoneme.preutter;
-            overlapMs = phoneme.overlap;
-            durCorrectionMs = phoneme.preutter - phoneme.tailIntrude + phoneme.tailOverlap;
-
-
-            resampler = track.RendererSettings.resampler;
-            int eng = (int)phoneme.GetExpression(project, track, Format.Ustx.ENG).Item1;
-            if (track.TryGetExpDescriptor(project, Format.Ustx.ENG, out var descriptor)
-                && eng >= 0 && eng < descriptor.options.Length
-                && !string.IsNullOrEmpty(descriptor.options[eng])) {
-                resampler = descriptor.options[eng];
-            }
-            flags = phoneme.GetResamplerFlags(project, track);
-            string voiceColor = phoneme.GetVoiceColor(project, track);
-            suffix = track.Singer.Subbanks.FirstOrDefault(
-                subbank => subbank.Color == voiceColor)?.Suffix ?? string.Empty;
-            volume = phoneme.GetExpression(project, track, Format.Ustx.VOL).Item1 * 0.01f;
-            velocity = phoneme.GetExpression(project, track, Format.Ustx.VEL).Item1 * 0.01f;
-            modulation = phoneme.GetExpression(project, track, Format.Ustx.MOD).Item1 * 0.01f;
-            leadingMs = phoneme.preutter;
-            envelope = phoneme.envelope.data.ToArray();
-            direct = phoneme.GetExpression(project, track, Format.Ustx.DIR).Item1 == 1;
-            toneShift = (int)phoneme.GetExpression(project, track, Format.Ustx.SHFT).Item1;
-            phonemeType = (int)phoneme.GetExpression(project, track, Format.Ustx.PHTP).Item1;
-            stretchMode = (int)phoneme.GetExpression(project, track, Format.Ustx.STRT).Item1;
-            spliceMode = (int)phoneme.GetExpression(project, track, Format.Ustx.SPLC).Item1;
-
-            oto = phoneme.oto;
+            oto = phoneme.Oto;
+            oto2 = phoneme.Oto2;
             hash = Hash();
         }
         private ulong Hash() {
@@ -160,6 +162,9 @@ namespace OpenUtau.Core.Render {
                         }
                     }
                     writer.Write(suffix);
+                    if (suffix2 != null) {
+                        writer.Write(suffix2);
+                    }
                     writer.Write(volume);
                     writer.Write(velocity);
                     writer.Write(modulation);
@@ -190,31 +195,42 @@ namespace OpenUtau.Core.Render {
         public readonly double leadingMs;
 
         public readonly RenderNote[] notes;
-        public readonly RenderPhone[] phones;
+        public RenderPhone[] phones { get; private set; }
 
-        public readonly float[] pitchesBeforeDeviation;
         // Not readonly: RefreshPitches() swaps in a freshly built array after a pitch curve edit so
         // background render threads always observe a fully written array.
         public float[] pitches;
+        public readonly float[] pitchesBeforeDeviation;
         public readonly float[] dynamics;
         public readonly float[] gender;
         public readonly float[] breathiness;
         public readonly float[] toneShift;
         public readonly float[] tension;
         public readonly float[] voicing;
+        public readonly float[] xsy;
         public readonly float[] lowcut;
         public readonly float[] warmth;
         public readonly float[] hcmp;
         public readonly float[] breathLow;
         public readonly float[] breathHigh;
         public readonly Tuple<string, float[]>[] curves;//custom curves defined by renderer
+        /// <summary>
+        /// The curves the expression graph drove, in the curves' own units on the pitch grid, for display.
+        /// Not part of the hash.
+        /// </summary>
+        public readonly IReadOnlyDictionary<string, float[]>? drivenCurves;
         public readonly ulong preEffectHash;
-        // Not readonly: RefreshPitches() updates it after a pitch curve edit so the render cache
-        // and the pitch line drawn in the piano roll follow the change without a full rebuild.
-        public ulong hash;
+        public ulong hash { get; private set; }
 
         internal readonly IRenderer renderer;
         public readonly string wavtool;
+
+        /// <summary>
+        /// The [startMs, endMs) range (absolute ms) of the rendered phrase
+        /// audio, including the leading pre-utter and the release tail,
+        /// matching the slot layout used by the mix.
+        /// </summary>
+        public readonly PhraseLayout Layout;
 
         private List<string> cacheFiles = new List<string>();
 
@@ -235,42 +251,40 @@ namespace OpenUtau.Core.Render {
             Log.Warning($"{message} (oto: {otoFile})");
         }
 
-        internal RenderPhrase(UProject project, UTrack track, UVoicePart part, IEnumerable<UPhoneme> phonemes) {
-            var uNotes = new List<UNote> { phonemes.First().Parent };
-            var endNote = phonemes.Last().Parent;
-            while (endNote.Next != null && endNote.Next.Extends != null) {
-                endNote = endNote.Next;
+        /// <summary>
+        /// The heavy phrase build over an immutable snapshot; pure over the
+        /// snapshot, safe off the UI thread.
+        /// </summary>
+        internal RenderPhrase(Pipeline.PhraseSource source, Pipeline.PhonemeSource[] phonemes, int phraseStart, int phraseEnd) {
+            var phrasePhonemes = phonemes
+                .Skip(phraseStart)
+                .Take(phraseEnd - phraseStart)
+                .ToList();
+            var notesOf = source.Notes;
+            var uNotes = source.PhraseNotes(phraseStart, phraseEnd);
+            if (notesOf[uNotes.First()].Prev != -1
+                && notesOf[notesOf[uNotes.First()].Prev].End == notesOf[uNotes.First()].Position) {
+                uNotes.Insert(0, notesOf[uNotes.First()].Prev);
             }
-            while (uNotes.Last() != endNote) {
-                uNotes.Add(uNotes.Last().Next);
-            }
-            var tail = uNotes.Last();
-            var next = tail.Next;
-            while (next != null && next.Extends == tail) {
-                uNotes.Add(next);
-                next = next.Next;
-            }
-            if (uNotes.First().Prev != null && uNotes.First().Prev.End == uNotes.First().position) {
-                uNotes.Insert(0, uNotes.First().Prev);
-            }
-            if (uNotes.Last().Next != null && uNotes.Last().End == uNotes.Last().Next.position) {
-                uNotes.Add(uNotes.Last().Next);
+            if (notesOf[uNotes.Last()].Next != -1
+                && notesOf[uNotes.Last()].End == notesOf[notesOf[uNotes.Last()].Next].Position) {
+                uNotes.Add(notesOf[uNotes.Last()].Next);
             }
 
-            singer = track.Singer;
-            renderer = track.RendererSettings.Renderer;
-            wavtool = track.RendererSettings.wavtool;
-            timeAxis = project.timeAxis.Clone();
+            singer = source.Singer;
+            renderer = source.Renderer;
+            wavtool = source.Wavtool;
+            timeAxis = source.Axis;
 
-            position = part.position + phonemes.First().position;
-            end = part.position + phonemes.Last().End;
+            position = source.PartPosition + phrasePhonemes.First().Position;
+            end = source.PartPosition + phrasePhonemes.Last().End;
             duration = end - position;
 
             notes = uNotes
-                .Select(n => new RenderNote(project, part, n, position))
+                .Select(n => new RenderNote(notesOf[n], timeAxis, source.PartPosition, position))
                 .ToArray();
-            phones = phonemes
-                .Select(p => new RenderPhone(project, track, part, p.Parent, p, position))
+            phones = phrasePhonemes
+                .Select(p => new RenderPhone(source, p, position))
                 .ToArray();
 
             leading = phones.First().leading;
@@ -281,11 +295,12 @@ namespace OpenUtau.Core.Render {
             leadingMs = phones.First().leadingMs;
 
             const int pitchInterval = 5;
-            int pitchStart = position - part.position - leading;
-            pitches = new float[(end - part.position - pitchStart) / pitchInterval + 1];
+            int pitchStart = position - source.PartPosition - leading;
+            pitches = new float[(end - source.PartPosition - pitchStart) / pitchInterval + 1];
             int index = 0;
             // Create flat pitches
-            foreach (var note in uNotes) {
+            foreach (int noteIdx in uNotes) {
+                var note = notesOf[noteIdx];
                 while (pitchStart + index * pitchInterval < note.End && index < pitches.Length) {
                     pitches[index] = note.AdjustedTone * 100;
                     index++;
@@ -296,40 +311,46 @@ namespace OpenUtau.Core.Render {
                 pitches[index] = pitches[index - 1];
                 index++;
             }
+            // The note pitch as steps, before vibrato and bends: for expression graphs to tell vibrato from pitch
+            // bends, and where rendered pitch falls back to.
+            float[]? pitchesBeforeVibrato = source.ExpressionGraph != null ? pitches.ToArray() : null;
             // Vibrato
-            foreach (var note in uNotes) {
-                if (note.vibrato.length <= 0) {
+            foreach (int noteIdx in uNotes) {
+                var note = notesOf[noteIdx];
+                if (note.Vibrato.Length <= 0) {
                     continue;
                 }
-                int startIndex = Math.Max(0, (int)Math.Ceiling((float)(note.position - pitchStart) / pitchInterval));
+                int startIndex = Math.Max(0, (int)Math.Ceiling((float)(note.Position - pitchStart) / pitchInterval));
                 int endIndex = Math.Min(pitches.Length, (note.End - pitchStart) / pitchInterval);
                 // Use tempo at note start to calculate vibrato period.
-                float nPeriod = (float)(note.vibrato.period / note.DurationMs);
+                float nPeriod = (float)(note.Vibrato.Period / note.DurationMs);
                 for (int i = startIndex; i < endIndex; ++i) {
-                    float nPos = (float)(pitchStart + i * pitchInterval - note.position) / note.duration;
-                    var point = note.vibrato.Evaluate(nPos, nPeriod, note);
+                    float nPos = (float)(pitchStart + i * pitchInterval - note.Position) / note.Duration;
+                    var point = note.Vibrato.Evaluate(nPos, nPeriod, note);
                     pitches[i] = point.Y * 100;
                 }
             }
+            float[]? vibratoPitches = source.ExpressionGraph != null ? pitches.ToArray() : null;
             // Pitch points
-            foreach (var note in uNotes) {
-                var pitchPoints = note.pitch.data
+            foreach (int noteIdx in uNotes) {
+                var note = notesOf[noteIdx];
+                var pitchPoints = note.PitchPoints
                     .Select(point => {
-                        double nodePosMs = timeAxis.TickPosToMsPos(part.position + note.position);
+                        double nodePosMs = timeAxis.TickPosToMsPos(source.PartPosition + note.Position);
                         return new PitchPoint(
-                               timeAxis.MsPosToTickPos(nodePosMs + point.X) - part.position,
+                               timeAxis.MsPosToTickPos(nodePosMs + point.X) - source.PartPosition,
                                point.Y * 10 + note.AdjustedTone * 100,
                                point.shape);
                     })
                     .ToList();
                 if (pitchPoints.Count == 0) {
-                    pitchPoints.Add(new PitchPoint(note.position, note.AdjustedTone * 100, PitchPointShape.io, true));
+                    pitchPoints.Add(new PitchPoint(note.Position, note.AdjustedTone * 100, PitchPointShape.io, true));
                     pitchPoints.Add(new PitchPoint(note.End, note.AdjustedTone * 100, PitchPointShape.io, true));
                 }
-                if (note == uNotes.First() && pitchPoints[0].X > pitchStart) {
+                if (noteIdx == uNotes.First() && pitchPoints[0].X > pitchStart) {
                     pitchPoints.Insert(0, new PitchPoint(pitchStart, pitchPoints[0].Y, PitchPointShape.io, true));
-                } else if (pitchPoints[0].X > note.position) {
-                    pitchPoints.Insert(0, new PitchPoint(note.position, pitchPoints[0].Y, PitchPointShape.io, true));
+                } else if (pitchPoints[0].X > note.Position) {
+                    pitchPoints.Insert(0, new PitchPoint(note.Position, pitchPoints[0].Y, PitchPointShape.io, true));
                 }
                 if (pitchPoints.Last().X < note.End) {
                     pitchPoints.Add(new PitchPoint(note.End, pitchPoints.Last().Y, PitchPointShape.io, true));
@@ -343,7 +364,7 @@ namespace OpenUtau.Core.Render {
                     PitchPoint point2 = i >= pitchPoints.Count - 2 ? pitchPoints[i + 1] : pitchPoints[i + 2];
                     int x = pitchStart + index * pitchInterval;
 
-                    if (note.pitch.data.Count > 2 && point0.shape == PitchPointShape.sp && !point1.autoCompleted) {
+                    if (note.PitchPoints.Count > 2 && point0.shape == PitchPointShape.sp && !point1.autoCompleted) {
                         var curve = new CubicSplineSegment(
                             point_1.X, point_1.Y,
                             point0.X, point0.Y,
@@ -351,8 +372,8 @@ namespace OpenUtau.Core.Render {
                             point2.X, point2.Y);
                         while (x < point1.X && index < pitches.Length) {
                             float pitch = (float)curve.GetY(x);
-                            float basePitch = note.Prev != null && x < note.Prev.End
-                                ? note.Prev.AdjustedTone * 100
+                            float basePitch = note.Prev != -1 && x < notesOf[note.Prev].End
+                                ? notesOf[note.Prev].AdjustedTone * 100
                                 : note.AdjustedTone * 100;
                             pitches[index] += pitch - basePitch;
                             index++;
@@ -361,8 +382,8 @@ namespace OpenUtau.Core.Render {
                     } else {
                         while (x < point1.X && index < pitches.Length) {
                             float pitch = (float)MusicMath.InterpolateShape(point0.X, point1.X, point0.Y, point1.Y, x, point0.shape);
-                            float basePitch = note.Prev != null && x < note.Prev.End
-                                ? note.Prev.AdjustedTone * 100
+                            float basePitch = note.Prev != -1 && x < notesOf[note.Prev].End
+                                ? notesOf[note.Prev].AdjustedTone * 100
                                 : note.AdjustedTone * 100;
                             pitches[index] += pitch - basePitch;
                             index++;
@@ -371,54 +392,57 @@ namespace OpenUtau.Core.Render {
                     }
                 }
             }
+            // Notes, pitch bends and vibrato, for expression graphs.
+            float[]? parametricPitches = source.ExpressionGraph != null ? pitches.ToArray() : null;
             // Mod plus
-            if (track.TryGetExpDescriptor(project, Format.Ustx.MODP, out var modp) && renderer.SupportsExpression(modp) && singer is ClassicSinger cSinger) {
-                foreach (var phoneme in phonemes) {
-                    var phonemeModp = phoneme.GetExpression(project, track, Format.Ustx.MODP).Item1;
+            if (source.ModpSupported && source.ClassicSinger != null) {
+                var cSinger = source.ClassicSinger;
+                foreach (var phoneme in phrasePhonemes) {
+                    var phonemeModp = phoneme.ModpRaw;
                     if (phonemeModp == 0) {
                         continue;
                     }
 
                     try {
-                        if (phoneme.oto.Frq == null) {
-                            phoneme.oto.Frq = new OtoFrq(phoneme.oto, cSinger.Frqs);
+                        if (phoneme.Oto.Frq == null) {
+                            phoneme.Oto.Frq = new OtoFrq(phoneme.Oto, cSinger.Frqs);
                         }
-                        if (phoneme.oto.Frq.loaded == false) {
-                            LogModPlusOnce(phoneme.oto.File, $"Mod plus skipped, frq is unusable: {phoneme.oto.Frq.error}");
+                        if (phoneme.Oto.Frq.loaded == false) {
+                            LogModPlusOnce(phoneme.Oto.File, $"Mod plus skipped, frq is unusable: {phoneme.Oto.Frq.error}");
                             continue;
                         }
-                        var frq = phoneme.oto.Frq;
+                        var frq = phoneme.Oto.Frq;
                         if (frq.toneDiffFix.Length == 0 || frq.toneDiffStretch.Length == 0) {
                             // Indexing these arrays with a clamp to Length - 1 throws when they are empty.
-                            LogModPlusOnce(phoneme.oto.File, $"Mod plus skipped, tone diff is empty (fix {frq.toneDiffFix.Length}, stretch {frq.toneDiffStretch.Length})");
+                            LogModPlusOnce(phoneme.Oto.File, $"Mod plus skipped, tone diff is empty (fix {frq.toneDiffFix.Length}, stretch {frq.toneDiffStretch.Length})");
                             continue;
                         }
-                        UTempo[] noteTempos = project.timeAxis.TemposBetweenTicks(part.position + phoneme.position, part.position + phoneme.End);
-                        var tempo = noteTempos.Length > 0 ? noteTempos[0].bpm : project.tempos[0].bpm; // compromise 妥協！
+                        UTempo[] noteTempos = phoneme.NoteTempos;
+                        var tempo = noteTempos.Length > 0 ? noteTempos[0].bpm : source.DefaultBpm; // compromise 妥協！
                         var frqIntervalTick = MusicMath.TempoMsToTick(tempo, (double)1 * 1000 / 44100 * frq.hopSize);
                         if (frqIntervalTick <= 0) {
-                            LogModPlusOnce(phoneme.oto.File, $"Mod plus skipped, invalid frq frame length {frqIntervalTick} (hop size {frq.hopSize})");
+                            LogModPlusOnce(phoneme.Oto.File, $"Mod plus skipped, invalid frq frame length {frqIntervalTick} (hop size {frq.hopSize})");
                             continue;
                         }
-                        double consonantStretch = Math.Pow(2f, 1.0f - phoneme.GetExpression(project, track, Format.Ustx.VEL).Item1 / 100f);
+                        double consonantStretch = Math.Pow(2f, 1.0f - phoneme.VelRaw / 100f);
 
-                        var preutter = MusicMath.TempoMsToTick(tempo, Math.Min(phoneme.preutter, phoneme.oto.Preutter * consonantStretch));
-                        int startIndex = Math.Max(0, (int)Math.Floor((phoneme.position - pitchStart - preutter) / pitchInterval));
-                        int position = (int)Math.Round((double)((phoneme.position - pitchStart) / pitchInterval));
-                        int startStretch = position + (int)Math.Round(MusicMath.TempoMsToTick(tempo, (phoneme.oto.Consonant - phoneme.oto.Preutter) * consonantStretch) / pitchInterval);
-                        int endIndex = Math.Min(pitches.Length, (int)Math.Ceiling(phoneme.End - pitchStart - MusicMath.TempoMsToTick(tempo, phoneme.tailIntrude - phoneme.tailOverlap)) / pitchInterval);
+                        var preutter = MusicMath.TempoMsToTick(tempo, Math.Min(phoneme.Preutter, phoneme.Oto.Preutter * consonantStretch));
+                        int startIndex = Math.Max(0, (int)Math.Floor((phoneme.Position - pitchStart - preutter) / pitchInterval));
+                        int position = (int)Math.Round((double)((phoneme.Position - pitchStart) / pitchInterval));
+                        int startStretch = position + (int)Math.Round(MusicMath.TempoMsToTick(tempo, (phoneme.Oto.Consonant - phoneme.Oto.Preutter) * consonantStretch) / pitchInterval);
+                        int endIndex = Math.Min(pitches.Length, (int)Math.Ceiling(phoneme.End - pitchStart - MusicMath.TempoMsToTick(tempo, phoneme.TailIntrude - phoneme.TailOverlap)) / pitchInterval);
 
                         double stretch = 1;
                         if (frq.toneDiffStretch.Length * frqIntervalTick < ((double)endIndex - startStretch) * pitchInterval) {
                             stretch = ((double)endIndex - startStretch) * pitchInterval / (frq.toneDiffStretch.Length * frqIntervalTick);
                         }
                         if (!double.IsFinite(stretch) || stretch <= 0) {
-                            LogModPlusOnce(phoneme.oto.File, $"Mod plus skipped, invalid stretch {stretch}");
+                            LogModPlusOnce(phoneme.Oto.File, $"Mod plus skipped, invalid stretch {stretch}");
                             continue;
                         }
                         var env0 = new Vector2(0, 0);
-                        var env1 = new Vector2((phoneme.envelope.data[1].X - phoneme.envelope.data[0].X) / (phoneme.envelope.data[4].X - phoneme.envelope.data[0].X), 100);
-                        var env3 = new Vector2((phoneme.envelope.data[3].X - phoneme.envelope.data[0].X) / (phoneme.envelope.data[4].X - phoneme.envelope.data[0].X), 100);
+                        var env1 = new Vector2((phoneme.Envelope[1].X - phoneme.Envelope[0].X) / (phoneme.Envelope[4].X - phoneme.Envelope[0].X), 100);
+                        var env3 = new Vector2((phoneme.Envelope[3].X - phoneme.Envelope[0].X) / (phoneme.Envelope[4].X - phoneme.Envelope[0].X), 100);
                         var env4 = new Vector2(1, 0);
 
                         for (int i = 0; startStretch + i <= endIndex; i++) {
@@ -432,7 +456,7 @@ namespace OpenUtau.Core.Render {
                             diff = Fade(diff, pit);
                             if (!double.IsFinite(diff)) {
                                 // NaN / Infinity would poison the pitch array and make the resampler fail.
-                                LogModPlusOnce(phoneme.oto.File, "Mod plus produced a non-finite pitch diff (stretch)");
+                                LogModPlusOnce(phoneme.Oto.File, "Mod plus produced a non-finite pitch diff (stretch)");
                                 continue;
                             }
                             pitches[pit] = pitches[pit] + (float)(diff * 100);
@@ -448,56 +472,85 @@ namespace OpenUtau.Core.Render {
                             diff = Fade(diff, pit);
                             if (!double.IsFinite(diff)) {
                                 // NaN / Infinity would poison the pitch array and make the resampler fail.
-                                LogModPlusOnce(phoneme.oto.File, "Mod plus produced a non-finite pitch diff (fix)");
+                                LogModPlusOnce(phoneme.Oto.File, "Mod plus produced a non-finite pitch diff (fix)");
                                 continue;
                             }
                             pitches[pit] = pitches[pit] + (float)(diff * 100);
                         }
                         double Fade(double diff, int pit) {
                             var percentage = (double)(pit - startIndex) / (endIndex - startIndex);
-                            if (phoneme.Next != null && phoneme.End == phoneme.Next.position && percentage > env3.X) {
+                            if (phoneme.NextAdjacent && percentage > env3.X) {
                                 diff = diff * Math.Clamp(MusicMath.Linear(env3.X, env4.X, env3.Y, env4.Y, percentage), 0, 100) / 100;
                             }
-                            if (phoneme.Prev != null && phoneme.Prev.End == phoneme.position && percentage < env1.X) {
+                            if (phoneme.PrevAdjacent && percentage < env1.X) {
                                 diff = diff * Math.Clamp(MusicMath.Linear(env0.X, env1.X, env0.Y, env1.Y, percentage), 0, 100) / 100;
                             }
                             return diff;
                         }
                     } catch(Exception e) {
-                        Log.Error(e, $"Failed to compute mod plus. oto: {phoneme.oto?.File}, phoneme: {phoneme.phoneme}, position: {phoneme.position}");
+                        Log.Error(e, $"Failed to compute mod plus. oto: {phoneme.Oto?.File}, phoneme: {phoneme.Phoneme}, position: {phoneme.Position}");
                     }
                 }
             }
 
             // PITD
             pitchesBeforeDeviation = pitches.ToArray();
-            var pitchCurve = part.curves.FirstOrDefault(c => c.abbr == Format.Ustx.PITD);
+            var pitchCurve = source.Curves.FirstOrDefault(c => c.Abbr == Format.Ustx.PITD);
             if (pitchCurve != null && !pitchCurve.IsEmpty) {
                 for (int i = 0; i < pitches.Length; ++i) {
                     pitches[i] += pitchCurve.Sample(pitchStart + i * pitchInterval);
                 }
             }
 
+            // The track's expression graph, on the same tick grid as the drawn curves: first the pitch, then the curves.
+            Dictionary<string, float[]>? graphCurves = null;
+            Dictionary<string, float[]>? drivenCurveValues = null;
+            if (source.ExpressionGraph != null) {
+                var ticks = new int[pitches.Length];
+                var modPlus = new float[pitches.Length];
+                var vibrato = new float[pitches.Length];
+                var pitchBend = new float[pitches.Length];
+                for (int i = 0; i < ticks.Length; ++i) {
+                    ticks[i] = pitchStart + i * pitchInterval;
+                    modPlus[i] = pitchesBeforeDeviation[i] - parametricPitches![i];
+                    vibrato[i] = vibratoPitches![i] - pitchesBeforeVibrato![i];
+                    pitchBend[i] = parametricPitches[i] - vibrato[i];
+                }
+                var phrasePitch = new ExpressionGraph.PhrasePitch(pitchStart, pitchInterval,
+                    pitchBend, vibrato, modPlus, pitchesBeforeVibrato);
+                var context = new ExpressionGraph.GraphContext(source, phrasePitch, phraseStart);
+                var drivenPitch = source.ExpressionGraph.EvaluatePitch(context, ticks);
+                if (drivenPitch != null) {
+                    Array.Copy(drivenPitch, pitches, pitches.Length);
+                }
+                graphCurves = source.ExpressionGraph.Evaluate(context, ticks);
+            }
+
             var curves = new List<Tuple<string, float[]>>();
 
-            foreach(var descriptor in project.expressions.Values) {
-                if(descriptor.type != UExpressionType.Curve) {
-                    continue;
+            foreach (var descriptor in source.CurveDescriptors) {
+                var curve = source.Curves.FirstOrDefault(c => c.Abbr == descriptor.abbr)
+                    ?? Pipeline.CurveSource.Empty(descriptor.abbr, (int)descriptor.defaultValue, (float)descriptor.min);
+                Func<float, Pipeline.CurveSource, float> convert = ((x, _) => x);
+                if (curve.Abbr == Format.Ustx.DYN) {
+                    convert = ((x, c) => x == c.Min ? 0 : (float)MusicMath.DecibelToLinear(x * 0.1));
                 }
-                var curve = part.curves.FirstOrDefault(c => c.abbr == descriptor.abbr);
-                bool isSupported = renderer.SupportsExpression(descriptor);
-                if (!isSupported) {
-                    continue;
+                float[] curveSampled;
+                if (graphCurves != null && curve.Abbr != Format.Ustx.PITD
+                        && graphCurves.TryGetValue(curve.Abbr, out var driven)) {
+                    // Kept within the range the curve could be drawn in.
+                    curveSampled = new float[driven.Length];
+                    var shown = new float[driven.Length];
+                    for (int i = 0; i < driven.Length; ++i) {
+                        shown[i] = Math.Clamp(driven[i], descriptor.min, descriptor.max);
+                        curveSampled[i] = convert(shown[i], curve);
+                    }
+                    drivenCurveValues ??= new Dictionary<string, float[]>();
+                    drivenCurveValues[curve.Abbr] = shown;
+                } else {
+                    curveSampled = SampleCurve(curve, pitchStart, pitches.Length, convert);
                 }
-                if (curve == null) {
-                    curve = new UCurve(descriptor);
-                }
-                Func<float, UCurve, float> convert = ((x, _) => x);
-                if (curve.abbr == Format.Ustx.DYN) {
-                    convert = ((x, c) => x == c.descriptor.min ? 0 : (float)MusicMath.DecibelToLinear(x * 0.1));
-                }
-                var curveSampled = SampleCurve(curve, pitchStart, pitches.Length, convert);
-                switch (curve.abbr) {
+                switch (curve.Abbr) {
                     case Format.Ustx.PITD: break;
                     case Format.Ustx.DYN : dynamics = curveSampled; break;
                     case Format.Ustx.SHFC: toneShift = curveSampled; break;
@@ -513,32 +566,54 @@ namespace OpenUtau.Core.Render {
                     case Format.Ustx.HCMP: hcmp = curveSampled; break;
                     case Format.Ustx.BREL: breathLow = curveSampled; break;
                     case Format.Ustx.BREH: breathHigh = curveSampled; break;
+                    case Format.Ustx.XSY:
+                        xsy = curveSampled;
+                        foreach (var phone in phones) {
+                            int startIdx = Math.Max(0, (phone.position - phone.leading - pitchStart) / pitchInterval);
+                            int endIdx = Math.Min(xsy.Length, Math.Max(0, (phone.position - pitchStart) / pitchInterval));
+                            for (int k = startIdx; k < endIdx; k++) {
+                                xsy[k] = 0f;
+                            }
+                        }
+                        break;
                     default:
-                        curves.Add(Tuple.Create(curve.abbr,curveSampled));
+                        curves.Add(Tuple.Create(curve.Abbr,curveSampled));
                         break;
                 }
             }
             // Linking vibrato and volume
             // int dynamicsInterval = 5;
-            foreach (var note in uNotes) {
-                if (note.vibrato.length <= 0 || note.vibrato.volLink == 0) {
+            foreach (int noteIdx in uNotes) {
+                var note = notesOf[noteIdx];
+                if (note.Vibrato.Length <= 0 || note.Vibrato.VolLink == 0) {
                     continue;
                 }
                 if (dynamics == null) {
-                    dynamics = new float[(end - part.position - pitchStart) / pitchInterval + 1];
+                    dynamics = new float[(end - source.PartPosition - pitchStart) / pitchInterval + 1];
                 }
-                int startIndex = Math.Max(0, (int)Math.Ceiling((float)(note.position - pitchStart) / pitchInterval));
+                int startIndex = Math.Max(0, (int)Math.Ceiling((float)(note.Position - pitchStart) / pitchInterval));
                 int endIndex = Math.Min(pitches.Length, (note.End - pitchStart) / pitchInterval);
-                float nPeriod = (float)(note.vibrato.period / note.DurationMs);
+                float nPeriod = (float)(note.Vibrato.Period / note.DurationMs);
                 for (int i = startIndex; i < endIndex; ++i) {
-                    float nPos = (float)(pitchStart + i * pitchInterval - note.position) / note.duration;
-                    float ratio = note.vibrato.EvaluateVolume(nPos, nPeriod);
+                    float nPos = (float)(pitchStart + i * pitchInterval - note.Position) / note.Duration;
+                    float ratio = note.Vibrato.EvaluateVolume(nPos, nPeriod);
                     dynamics[i] = dynamics[i] * ratio;
                 }
             }
             this.curves = curves.ToArray();
+            drivenCurves = drivenCurveValues;
             preEffectHash = Hash(false);
             hash = Hash(true);
+
+            try {
+                var layout = renderer.Layout(this);
+                double startMs = layout.positionMs - layout.leadingMs;
+                Layout = new PhraseLayout(startMs, startMs + layout.estimatedLengthMs, layout.leadingMs, layout.estimatedLengthMs);
+            } catch {
+                // Layout can fail when the singer is not usable; fall back
+                // to the phoneme span.
+                Layout = new PhraseLayout(positionMs, endMs, 0, endMs - positionMs);
+            }
         }
 
         /// <summary>
@@ -586,7 +661,7 @@ namespace OpenUtau.Core.Render {
             return phrase.pitchesBeforeDeviation[pitchIndex];
         }
 
-        private static float[] SampleCurve(UCurve curve, int start, int length, Func<float, UCurve, float> convert) {
+        private static float[] SampleCurve(Pipeline.CurveSource curve, int start, int length, Func<float, Pipeline.CurveSource, float> convert) {
             const int interval = 5;
             var result = new float[length];
             for (int i = 0; i < length; ++i) {
@@ -595,18 +670,10 @@ namespace OpenUtau.Core.Render {
             return result;
         }
 
-        private static float[] SampleCurve(UVoicePart part, string abbr, int start, int length, Func<float, UCurve, float> convert) {
-            var curve = part.curves.FirstOrDefault(c => c.abbr == abbr);
-            if (curve == null) {
-                return null;
-            }
-            return SampleCurve(curve, start, length, convert);
-        }
-
         private ulong Hash(bool postEffect) {
             using (var stream = new MemoryStream()) {
                 using (var writer = new BinaryWriter(stream)) {
-                    writer.Write(singer.Id);
+                    writer.Write(singer?.Id ?? string.Empty);
                     writer.Write(renderer?.ToString() ?? "");
                     writer.Write(wavtool ?? "");
                     writer.Write(timeAxis.Timestamp);
@@ -614,7 +681,7 @@ namespace OpenUtau.Core.Render {
                         writer.Write(phone.hash);
                     }
                     if (postEffect) {
-                        foreach (var array in new float[][] { pitches, dynamics, gender, breathiness, toneShift, tension, voicing, lowcut, warmth, hcmp, breathLow, breathHigh }) {
+                        foreach (var array in new float[][] { pitches, dynamics, gender, breathiness, toneShift, tension, voicing, xsy, lowcut, warmth, hcmp, breathLow, breathHigh }) {
                             if (array == null) {
                                 writer.Write("null");
                             } else {
@@ -635,27 +702,34 @@ namespace OpenUtau.Core.Render {
             }
         }
 
+        /// <summary>
+        /// The secondary variant of an xsy cross-synthesis render: a separate phrase
+        /// in which every phone that has an oto2 carries the oto2 instead of the oto,
+        /// with the xsy hash mask applied. The live phrase is never mutated. The copy
+        /// shares the cache-file list, so both variants' cache files are cleaned up
+        /// together.
+        /// </summary>
+        internal static RenderPhrase BuildXsyVariant(RenderPhrase src) {
+            var variant = (RenderPhrase)src.MemberwiseClone();
+            var phones = new RenderPhone[src.phones.Length];
+            for (int i = 0; i < src.phones.Length; ++i) {
+                var phone = src.phones[i];
+                phones[i] = phone.oto2 != null ? phone.WithOto(phone.oto2) : phone;
+            }
+            variant.phones = phones;
+            variant.hash = src.hash ^ RenderPhone.Oto2HashMask;
+            return variant;
+        }
+
+        /// <summary>
+        /// Synchronous snapshot + build, for script and test callers.
+        /// </summary>
         public static List<RenderPhrase> FromPart(UProject project, UTrack track, UVoicePart part) {
-            var phrases = new List<RenderPhrase>();
-            var phonemes = part.phonemes
-                .Where(phoneme => !phoneme.Error)
-                .ToList();
-            if (phonemes.Count == 0) {
-                return phrases;
+            var source = Pipeline.PhraseSource.FromPart(project, track, part, 0);
+            if (source == null) {
+                return new List<RenderPhrase>();
             }
-            var phrasePhonemes = new List<UPhoneme>() { phonemes[0] };
-            for (int i = 1; i < phonemes.Count; ++i) {
-                if (phonemes[i - 1].End != phonemes[i].position) {
-                    phrases.Add(new RenderPhrase(project, track, part, phrasePhonemes));
-                    phrasePhonemes.Clear();
-                }
-                phrasePhonemes.Add(phonemes[i]);
-            }
-            if (phrasePhonemes.Count > 0) {
-                phrases.Add(new RenderPhrase(project, track, part, phrasePhonemes));
-                phrasePhonemes.Clear();
-            }
-            return phrases;
+            return source.BuildPhrases().ToList();
         }
 
         public void AddCacheFile(string file) {
