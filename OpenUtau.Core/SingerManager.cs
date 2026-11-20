@@ -32,6 +32,11 @@ namespace OpenUtau.Core {
             var oldSingers = Singers.Values.ToList();
             var found = ClassicSingerLoader.FindAllSingers()
                 .Concat(Vogen.VogenSingerLoader.FindAllSingers())
+                // 同一个文件夹被多个声库根目录扫到（例如把父目录和子目录都加了进来）时，
+                // 只保留一份，避免误报“重复的声库文件夹”。
+                .GroupBy(s => string.IsNullOrEmpty(s.Location) ? s.Id : s.Location,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
                 .ToList();
             // Singers with the same id are equal (see USinger.Equals), so this keeps the first.
             var singers = found.Distinct();
